@@ -1,0 +1,7 @@
+.env
+.venv
+legacy
+*.pyc
+logs
+basic_usage.py
+test_without_install.py
