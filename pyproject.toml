@@ -1,0 +1,87 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zerodha-data-fetcher"
+version = "1.0.0"
+description = "A Python package for fetching historical data from Zerodha API"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    {name = "Jayam Gupta", email = "guptajayam47@gmail.com"}
+]
+maintainers = [
+    {name = "Jayam Gupta", email = "guptajayam47@gmail.com"}
+]
+keywords = ["zerodha", "trading", "data", "api", "historical", "stock-market"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Financial and Insurance Industry",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business :: Financial",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+requires-python = ">=3.8"
+dependencies = [
+    "requests>=2.25.0",
+    "pandas>=1.3.0",
+    "python-dateutil>=2.8.0",
+    "pyotp>=2.6.0",
+    "keyring>=23.0.0",
+    "cryptography>=3.4.0",
+    "Brotli>=1.0.9",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=6.0",
+    "pytest-cov>=2.0",
+    "black>=21.0",
+    "flake8>=3.9",
+    "mypy>=0.910",
+    "pre-commit>=2.15",
+]
+docs = [
+    "sphinx>=4.0",
+    "sphinx-rtd-theme>=1.0",
+    "myst-parser>=0.15",
+]
+
+[project.urls]
+Homepage = "https://github.com/JayceeGupta/Zerodha-Data-Fetcher"
+Repository = "https://github.com/JayceeGupta/Zerodha-Data-Fetcher"
+Documentation = "https://github.com/JayceeGupta/Zerodha-Data-Fetcher#readme"
+"Bug Tracker" = "https://github.com/JayceeGupta/Zerodha-Data-Fetcher/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+zerodha_data_fetcher = ["utils/data/*.csv", "utils/data/*.json"]
+
+[tool.black]
+line-length = 88
+target-version = ['py38']
+include = '\.pyi?$'
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --cov=zerodha_data_fetcher --cov-report=html --cov-report=term-missing"

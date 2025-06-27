@@ -1,7 +1,20 @@
+# Python bytecode
+*.pyc
+
+# Python package files
+*.egg-info
+dist
+
+# Virtual environments
 .env
 .venv
+
+# Directories
 legacy
-*.pyc
 logs
-basic_usage.py
+
+# Test files
 test_without_install.py
+
+# Example files
+basic_usage.py

@@ -1,0 +1,9 @@
+include README.md
+include LICENSE
+include pyproject.toml
+include setup.py
+recursive-include src/zerodha_data_fetcher *.py
+recursive-include src/zerodha_data_fetcher/utils/data *.csv
+recursive-include src/zerodha_data_fetcher/utils/data *.json
+recursive-exclude * __pycache__
+recursive-exclude * *.py[co]

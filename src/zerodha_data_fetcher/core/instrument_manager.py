@@ -7,6 +7,7 @@ from typing import List, Optional, Union
 import pandas as pd
 
 from ..utils.exceptions import ZerodhaAPIError
+from ..utils.data_loader import load_instrument_data, get_default_instrument_path
 
 logger = logging.getLogger(__name__)
 
@@ -17,14 +18,15 @@ class ZerodhaInstrumentManager:
     def __init__(self, 
                  equity_scrip_path: Optional[str] = None,
                  commodity_scrip_path: Optional[str] = None,
-                 instrument_id_path: Optional[str] = "src\\zerodha_data_fetcher\\utils\\data\\Kite_Instrument_ID.csv"):
+                 instrument_id_path: Optional[str] = None):
         """
         Initialize the instrument manager.
         
         Args:
             equity_scrip_path: Path to equity scrip list Excel file
             commodity_scrip_path: Path to commodity scrip list Excel file  
-            instrument_id_path: Path to Zerodha instrument ID CSV file
+            instrument_id_path: Path to Zerodha instrument ID CSV file.
+                               If None, uses bundled instrument data.
         """
         self.equity_scrip_path = equity_scrip_path
         self.commodity_scrip_path = commodity_scrip_path
@@ -36,6 +38,12 @@ class ZerodhaInstrumentManager:
         self._instrument_data: Optional[pd.DataFrame] = None
         
         logger.info("Zerodha Instrument Manager initialized")
+        
+        # Log which instrument data source will be used
+        if self.instrument_id_path:
+            logger.info(f"Using custom instrument data path: {self.instrument_id_path}")
+        else:
+            logger.info("Using bundled instrument data")
     
     def _load_equity_stocks(self) -> List[str]:
         """Load equity stock list from Excel file."""
@@ -74,18 +82,50 @@ class ZerodhaInstrumentManager:
     def _load_instrument_data(self) -> pd.DataFrame:
         """Load Zerodha instrument ID data from CSV file."""
         if self._instrument_data is None:
-            if not self.instrument_id_path or not os.path.exists(self.instrument_id_path):
-                logger.error("Instrument ID path not provided or file doesn't exist")
-                raise ZerodhaAPIError("Zerodha instrument ID file not found")
-                
             try:
-                self._instrument_data = pd.read_csv(
-                    self.instrument_id_path,
-                    usecols=['instrument_token', 'tradingsymbol', 'name', 'exchange']
-                )
+                # Use the data loader utility
+                if self.instrument_id_path:
+                    # Custom path provided
+                    if not os.path.exists(self.instrument_id_path):
+                        logger.error(f"Custom instrument ID path not found: {self.instrument_id_path}")
+                        raise ZerodhaAPIError("Custom Zerodha instrument ID file not found")
+                    
+                    logger.debug(f"Loading instrument data from custom path: {self.instrument_id_path}")
+                    self._instrument_data = pd.read_csv(
+                        self.instrument_id_path,
+                        usecols=['instrument_token', 'tradingsymbol', 'name', 'exchange']
+                    )
+                else:
+                    # Use bundled data
+                    logger.debug("Loading instrument data from bundled package data")
+                    self._instrument_data = load_instrument_data()
+                    
+                    # Check if the bundled data has the expected columns
+                    expected_columns = ['instrument_token', 'tradingsymbol', 'name', 'exchange']
+                    available_columns = self._instrument_data.columns.tolist()
+                    
+                    # Try to use available columns or raise error
+                    if not all(col in available_columns for col in expected_columns):
+                        logger.warning(f"Expected columns {expected_columns}, found {available_columns}")
+                        # Try to use the data as-is if it has some required columns
+                        if 'instrument_token' not in available_columns:
+                            raise ZerodhaAPIError("Instrument data missing required 'instrument_token' column")
+                
                 # Rename columns for consistency
-                self._instrument_data.columns = ['Instrument_Token', 'Name', 'FullName', 'Exchange']
+                column_mapping = {
+                    'instrument_token': 'Instrument_Token',
+                    'tradingsymbol': 'Name', 
+                    'name': 'FullName',
+                    'exchange': 'Exchange'
+                }
+                
+                # Only rename columns that exist
+                existing_mapping = {k: v for k, v in column_mapping.items() if k in self._instrument_data.columns}
+                self._instrument_data = self._instrument_data.rename(columns=existing_mapping)
+                
                 logger.debug(f"Loaded Zerodha instrument IDs with {len(self._instrument_data)} entries")
+                logger.debug(f"Available columns: {self._instrument_data.columns.tolist()}")
+                
             except Exception as e:
                 logger.error(f"Failed to load instrument data: {str(e)}")
                 raise ZerodhaAPIError(f"Failed to load instrument data: {str(e)}")
@@ -230,7 +270,7 @@ def fetchZerodhaID(stock: bool,
         stock: If True, fetch instrument IDs for stocks, otherwise for commodities
         equity_scrip_path: Path to equity scrip list
         commodity_scrip_path: Path to commodity scrip list
-        instrument_id_path: Path to instrument ID file
+        instrument_id_path: Path to instrument ID file (if None, uses bundled data)
         
     Returns:
         pd.DataFrame: Instrument IDs DataFrame

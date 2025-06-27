@@ -51,7 +51,7 @@ class AuthenticationManager:
                 logger.debug("Found token data in keyring")
                 time_elapsed = current_time - float(token_timestamp)
                 logger.debug(f"Time elapsed since last token: {time_elapsed} seconds")
-                
+                logger.debug(f"Token expiry time: {expiry_seconds} seconds")
                 if token_date == today and time_elapsed < expiry_seconds:
                     logger.info("Found valid token for today")
                     return TokenEncryption.decrypt_token(encrypted_token)

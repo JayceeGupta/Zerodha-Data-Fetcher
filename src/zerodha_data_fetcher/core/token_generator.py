@@ -108,11 +108,11 @@ class ZerodhaTokenGenerator:
             logger.debug("Initial session started successfully")
 
             # Prepare headers
-            generic_headers = {
+            generic_headers: Dict[str, str] = {
             'Content-Type': 'application/x-www-form-urlencoded',
             'Accept-Encoding': 'gzip, deflate, br',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',      
-        }
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+            }
             
             # Login request
             login_payload = {
@@ -125,6 +125,11 @@ class ZerodhaTokenGenerator:
             login_response = session.post(login_url, data=login_payload, headers=generic_headers)
             login_response.raise_for_status()
             logger.info("Login request successful")
+            
+            logger.debug(f"Login response Text: {login_response.text}")
+            logger.debug(f"Login response Headers: {login_response.headers}")
+            logger.debug(f"Login response Content: {login_response.content}")
+            logger.debug(f"Login response Status Code: {login_response.status_code}")
             
             # Parse login response
             login_data = json.loads(login_response.content)

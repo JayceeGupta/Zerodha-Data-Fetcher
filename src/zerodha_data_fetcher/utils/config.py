@@ -99,7 +99,7 @@ class Config:
             self.ZERODHA_KEYRING_TOKEN_KEY: "ZERODHA_KEYRING_TOKEN_KEY",
             self.ZERODHA_KEYRING_ENCRYPTION_KEY: "ZERODHA_KEYRING_ENCRYPTION_KEY"
         }
-        
+        print.warning(config_mapping)
         return [var_name for var_value, var_name in config_mapping.items() if not var_value]
 
     def to_dict(self) -> Dict[str, str]:
