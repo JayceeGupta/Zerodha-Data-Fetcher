@@ -33,9 +33,21 @@ class ZerodhaDataFetcher:
     """Main class for fetching historical data from Zerodha API."""
     
     def __init__(self, 
-                 requests_per_second: int = Config.DEFAULT_REQUESTS_PER_SECOND,
-                 token_expiry_hours: float = Config.DEFAULT_TOKEN_EXPIRY_HOURS,
-                 instrument_manager: Optional[ZerodhaInstrumentManager] = None):
+             requests_per_second: int = Config.DEFAULT_REQUESTS_PER_SECOND,
+             token_expiry_hours: float = Config.DEFAULT_TOKEN_EXPIRY_HOURS,
+             instrument_manager: Optional[ZerodhaInstrumentManager] = None,
+             # Configuration parameters
+             user_id: Optional[str] = None,
+             password: Optional[str] = None,
+             user_type: Optional[str] = None,
+             totp_secret: Optional[str] = None,
+             base_url: Optional[str] = None,
+             login_url: Optional[str] = None,
+             two_fa_url: Optional[str] = None,
+             historical_url: Optional[str] = None,
+             keyring_token_key: Optional[str] = None,
+             keyring_encryption_key: Optional[str] = None,
+             **kwargs):
         """
         Initialize the Zerodha Data Fetcher.
         
@@ -43,17 +55,57 @@ class ZerodhaDataFetcher:
             requests_per_second: Rate limit for API requests
             token_expiry_hours: Token expiry time in hours
             instrument_manager: Optional instrument manager instance
+            user_id: Zerodha user ID (overrides env var)
+            password: Zerodha password (overrides env var)
+            user_type: Zerodha user type (overrides env var)
+            totp_secret: TOTP secret key (overrides env var)
+            base_url: Zerodha base URL (overrides env var)
+            login_url: Zerodha login URL (overrides env var)
+            two_fa_url: Zerodha 2FA URL (overrides env var)
+            historical_url: Zerodha historical data URL (overrides env var)
+            keyring_token_key: Keyring token key (overrides env var)
+            keyring_encryption_key: Keyring encryption key (overrides env var)
+            **kwargs: Additional configuration parameters
         """
         self.requests_per_second = max(
             Config.MIN_REQUESTS_PER_SECOND,
             min(requests_per_second, Config.MAX_REQUESTS_PER_SECOND)
         )
         
-        self.auth_manager = AuthenticationManager(token_expiry_hours)
+        # Create configuration instance with provided parameters
+        config_params = {
+            'user_id': user_id,
+            'password': password,
+            'user_type': user_type,
+            'totp_secret': totp_secret,
+            'base_url': base_url,
+            'login_url': login_url,
+            'two_fa_url': two_fa_url,
+            'historical_url': historical_url,
+            'keyring_token_key': keyring_token_key,
+            'keyring_encryption_key': keyring_encryption_key,
+            **kwargs
+        }
+        
+        # Remove None values
+        config_params = {k: v for k, v in config_params.items() if v is not None}
+        
+        # Create configuration instance
+        self.config = Config(**config_params)
+        
+        # Initialize auth manager and instrument manager with custom config
+        self.auth_manager = AuthenticationManager(token_expiry_hours, config=self.config)
         self.instrument_manager = instrument_manager or ZerodhaInstrumentManager()
         
         logger.info(f"ZerodhaDataFetcher initialized with {self.requests_per_second} req/sec")
-    
+        
+        # Log configuration status
+        if self.config.validate_config():
+            logger.info("All required configuration parameters are set")
+        else:
+            missing = self.config.get_missing_config()
+            logger.warning(f"Missing configuration parameters: {missing}")
+
     def _validate_ticker_token(self, ticker_token: Union[int, str]) -> bool:
         """
         Validates a given ticker token by attempting to fetch a small data chunk.
@@ -72,7 +124,7 @@ class ZerodhaDataFetcher:
             # Try to fetch a small chunk of data
             params = (
                 before, today, 
-                Config.get_user_id(), 
+                self.config.get_user_id(), 
                 'minute', 
                 ticker_token, 
                 {'Authorization': f'enctoken {token_data}'}
@@ -171,7 +223,7 @@ class ZerodhaDataFetcher:
             logger.debug(f"Fetching data chunk: {thread_name}")
             
             # Get URL template
-            url_template = Config.get_historical_url()
+            url_template = self.config.get_historical_url()
             if not url_template:
                 raise DataFetchError("Historical URL template not configured")
             
@@ -336,7 +388,7 @@ class ZerodhaDataFetcher:
             # Get authentication token and headers
             auth_token = self.auth_manager.get_auth_token()
             headers = {'Authorization': f'enctoken {auth_token}'}
-            userid = Config.get_user_id()
+            userid = self.config.get_user_id()
             
             logger.debug(f"Using resolved token: {resolved_token}, User ID: {userid}")
             

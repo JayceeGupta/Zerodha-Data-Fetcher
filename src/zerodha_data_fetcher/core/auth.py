@@ -19,11 +19,12 @@ logger = logging.getLogger(__name__)
 class AuthenticationManager:
     """Manages authentication tokens for Zerodha API."""
     
-    def __init__(self, token_expiry_hours: float = Config.DEFAULT_TOKEN_EXPIRY_HOURS):
+    def __init__(self, token_expiry_hours: float = Config.DEFAULT_TOKEN_EXPIRY_HOURS, config: Optional['Config'] = None):
         self.token_expiry_hours = token_expiry_hours
-        self.token_key = Config.ZERODHA_KEYRING_TOKEN_KEY
-        self.token_generator = ZerodhaTokenGenerator()
-        
+        self.config = config or Config()
+        self.token_key = self.config.ZERODHA_KEYRING_TOKEN_KEY
+        self.token_generator = ZerodhaTokenGenerator(config=self.config)
+
     def get_auth_token(self) -> str:
         """
         Retrieves an authentication token for accessing the Zerodha API.
@@ -80,7 +81,7 @@ class AuthenticationManager:
             keyring.set_password(self.token_key, "token", encrypted_token)
             keyring.set_password(self.token_key, "date", today)
             keyring.set_password(self.token_key, "timestamp", str(current_time))
-            keyring.set_password(self.token_key, "userid", Config.get_user_id())
+            keyring.set_password(self.token_key, "userid", self.config.get_user_id())
             
             logger.info("Successfully saved new token to keyring")
             return new_token

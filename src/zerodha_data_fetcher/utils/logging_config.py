@@ -25,18 +25,21 @@ def setup_logging(
         backup_count: Number of backup files to keep
     """
     
-    # Default log format
+    # Improved log format - more readable and informative
     if log_format is None:
         log_format = (
-            "%(asctime)s - %(name)s - %(levelname)s - "
-            "[%(filename)s:%(lineno)d] - %(funcName)s() - %(message)s"
+            "%(asctime)s | %(levelname)-7s | %(name)-30s | "
+            "%(funcName)-20s:%(lineno)-3d | %(message)s"
         )
+    
+    # Set date format to show only time with milliseconds
+    date_format = "%H:%M:%S"
     
     # Convert string level to logging constant
     numeric_level = getattr(logging, log_level.upper(), logging.INFO)
     
-    # Create formatter
-    formatter = logging.Formatter(log_format)
+    # Create formatter with improved format
+    formatter = logging.Formatter(log_format, datefmt=date_format)
     
     # Get root logger
     root_logger = logging.getLogger()
@@ -46,7 +49,7 @@ def setup_logging(
     for handler in root_logger.handlers[:]:
         root_logger.removeHandler(handler)
     
-    # Console handler
+    # Console handler with color support (if available)
     console_handler = logging.StreamHandler()
     console_handler.setLevel(numeric_level)
     console_handler.setFormatter(formatter)
@@ -75,7 +78,6 @@ def setup_logging(
     logging.getLogger('keyring').setLevel(logging.WARNING)
     
     logging.info(f"Logging configured - Level: {log_level}, File: {log_file or 'Console only'}")
-
 
 def get_logger(name: str) -> logging.Logger:
     """

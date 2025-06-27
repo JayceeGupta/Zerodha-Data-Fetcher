@@ -4,7 +4,7 @@ import os
 import sys
 import logging
 import json
-from typing import Dict, Union, List, Any
+from typing import Dict, Union, List, Any, Optional
 
 import pyotp
 from requests import Session, Response
@@ -19,24 +19,18 @@ logger = logging.getLogger(__name__)
 class ZerodhaTokenGenerator:
     """Handles generation of Zerodha authentication tokens."""
     
-    def __init__(self):
-        """Initialize the token generator with required environment variables."""
-        self.required_vars = {
-            "ZERODHA_USER_ID": os.getenv("ZERODHA_USER_ID", ""),
-            "ZERODHA_PASSWORD": os.getenv("ZERODHA_PASSWORD", ""), 
-            "ZERODHA_TYPE": os.getenv("ZERODHA_TYPE", ""),
-            "ZERODHA_TOTP_SECRET": os.getenv("ZERODHA_TOTP_SECRET", ""),
-            "ZERODHA_BASE_URL": os.getenv("ZERODHA_BASE_URL", ""),
-            "ZERODHA_LOGIN_URL": os.getenv("ZERODHA_LOGIN_URL", ""),
-            "ZERODHA_2FA_URL": os.getenv("ZERODHA_2FA_URL", "")
-        }
+    def __init__(self, config):
+        """Initialize the token generator with configuration."""
+        from ..utils.config import Config
         
-        # Validate required environment variables
-        missing_vars = [key for key, value in self.required_vars.items() if not value]
-        if missing_vars:
-            logger.error(f"Missing required environment variables: {', '.join(missing_vars)}")
-            raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
-    
+        self.config = config or Config()
+        
+        # Validate required configuration
+        if not self.config.validate_config():
+            missing_vars = self.config.get_missing_config()
+            logger.error(f"Missing required configuration: {', '.join(missing_vars)}")
+            raise ValueError(f"Missing required configuration: {', '.join(missing_vars)}")
+
     def get_totp(self, key: str = "") -> str:
         """
         Generates a Time-based One-Time Password (TOTP) value using the provided secret key.
@@ -53,7 +47,7 @@ class ZerodhaTokenGenerator:
         logger.debug("Starting TOTP generation")
         
         try:
-            totp_secret = key or self.required_vars["ZERODHA_TOTP_SECRET"]
+            totp_secret = key or self.config.ZERODHA_TOTP_SECRET
             logger.debug("Retrieved TOTP secret")
             
             if totp_secret is None:
@@ -92,14 +86,15 @@ class ZerodhaTokenGenerator:
         
         try:
             # Get credentials from validated environment variables
-            userid = self.required_vars["ZERODHA_USER_ID"]
-            password = self.required_vars["ZERODHA_PASSWORD"]
-            user_type = self.required_vars["ZERODHA_TYPE"]
-            totp_secret = self.required_vars["ZERODHA_TOTP_SECRET"]
-            base_url = self.required_vars["ZERODHA_BASE_URL"]
-            login_url = self.required_vars["ZERODHA_LOGIN_URL"]
-            two_factor_url = self.required_vars["ZERODHA_2FA_URL"]
-            
+            # Get credentials from configuration
+            userid = self.config.ZERODHA_USER_ID
+            password = self.config.ZERODHA_PASSWORD
+            user_type = self.config.ZERODHA_TYPE
+            totp_secret = self.config.ZERODHA_TOTP_SECRET
+            base_url = self.config.ZERODHA_BASE_URL
+            login_url = self.config.ZERODHA_LOGIN_URL
+            two_factor_url = self.config.ZERODHA_2FA_URL
+
             logger.debug("Environment variables validated successfully")
 
             # Generate TOTP
@@ -114,10 +109,10 @@ class ZerodhaTokenGenerator:
 
             # Prepare headers
             generic_headers = {
-                'Content-Type': 'application/x-www-form-urlencoded',
-                'Accept-Encoding': 'gzip, deflate, br',
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',      
-            }
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',      
+        }
             
             # Login request
             login_payload = {
@@ -131,11 +126,9 @@ class ZerodhaTokenGenerator:
             login_response.raise_for_status()
             logger.info("Login request successful")
             
-            print(login_response.content)
-            
             # Parse login response
             login_data = json.loads(login_response.content)
-            
+
             if not login_data.get('data') or not login_data['data'].get('request_id'):
                 error_msg = login_data.get('message', 'Unknown error')
                 logger.error(f"Login failed: {error_msg}")
@@ -181,9 +174,9 @@ def getEncAuthToken() -> str:
     Returns:
         str: Authentication token
     """
-    generator = ZerodhaTokenGenerator()
+    from ..utils.config import Config
+    generator = ZerodhaTokenGenerator(config=Config())
     return generator.generate_auth_token()
-
 
 def get_TOTP(key: str = 'ZERODHA_TOTP_SECRET') -> str:
     """
@@ -195,7 +188,8 @@ def get_TOTP(key: str = 'ZERODHA_TOTP_SECRET') -> str:
     Returns:
         str: TOTP value
     """
-    generator = ZerodhaTokenGenerator()
+    from ..utils.config import Config
+    generator = ZerodhaTokenGenerator(config=Config())
     # If key looks like an env var name, get it from environment
     if key.isupper() and '_' in key:
         secret = os.getenv(key, "")
