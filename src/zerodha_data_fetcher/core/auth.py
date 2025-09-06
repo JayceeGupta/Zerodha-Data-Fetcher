@@ -24,6 +24,7 @@ class AuthenticationManager:
         self.config = config or Config()
         self.token_key = self.config.ZERODHA_KEYRING_TOKEN_KEY
         self.token_generator = ZerodhaTokenGenerator(config=self.config)
+        self.token_encryption = TokenEncryption(self.config.ZERODHA_KEYRING_ENCRYPTION_KEY)
 
     def get_auth_token(self) -> str:
         """
@@ -54,7 +55,7 @@ class AuthenticationManager:
                 logger.debug(f"Token expiry time: {expiry_seconds} seconds")
                 if token_date == today and time_elapsed < expiry_seconds:
                     logger.info("Found valid token for today")
-                    return TokenEncryption.decrypt_token(encrypted_token)
+                    return self.token_encryption.decrypt_token(encrypted_token)
                 else:
                     logger.debug("Stored token is outdated")
             else:
@@ -72,8 +73,9 @@ class AuthenticationManager:
         
         try:
             new_token = self.token_generator.generate_auth_token()
-            encrypted_token = TokenEncryption.encrypt_token(new_token)
-                
+            encrypted_token = self.token_encryption.encrypt_token(new_token)
+            if not new_token or not encrypted_token:
+                raise AuthenticationError("Failed to generate or encrypt new token")
             # Store the new token
             today = date.today().strftime('%Y-%m-%d')
             current_time = time.time()
