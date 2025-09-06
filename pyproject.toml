@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "zerodha-data-fetcher"
-version = "1.0.0"
-description = "A Python package for fetching historical data from Zerodha API"
+version = "1.0.1"
+description = "A Python package for fetching historical data from Zerodha API Using Account Credentials."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -39,6 +39,7 @@ dependencies = [
     "keyring>=23.0.0",
     "cryptography>=3.4.0",
     "Brotli>=1.0.9",
+    "python-dotenv>=0.19.0",
 ]
 
 [project.optional-dependencies]

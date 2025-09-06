@@ -15,6 +15,7 @@ logs
 
 # Test files
 test_without_install.py
+commands.txt
 
 # Example files
 basic_usage.py
