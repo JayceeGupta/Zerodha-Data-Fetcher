@@ -1,9 +1,11 @@
 # Python bytecode
 *.pyc
+__pycache__/
 
 # Python package files
 *.egg-info
 dist
+build/
 
 # Virtual environments
 .env
@@ -12,10 +14,20 @@ dist
 # Directories
 legacy
 logs
+.pytest_cache/
+htmlcov/
 
 # Test files
 test_without_install.py
 commands.txt
+.coverage
+.coverage.*
 
 # Example files
 basic_usage.py
+
+# Tooling lockfiles
+uv.lock
+
+# Local planning / scratch docs
+risk-mitigation-plan*.md
