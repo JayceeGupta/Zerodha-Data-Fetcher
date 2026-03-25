@@ -1,48 +1,37 @@
 """Rate limiting functionality for API requests."""
 
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
 
+class RequestRateLimiter:
+    """Thread-safe execution-time limiter shared across worker threads."""
+
+    def __init__(self, requests_per_second: int):
+        if requests_per_second <= 0:
+            raise ValueError("requests_per_second must be greater than 0")
+
+        self.requests_per_second = requests_per_second
+        self._min_interval = 1.0 / requests_per_second
+        self._lock = threading.Lock()
+        self._next_allowed_time = 0.0
+
+    def wait_for_slot(self) -> None:
+        """Block until the caller is allowed to issue the next request."""
+        with self._lock:
+            now = time.monotonic()
+            scheduled_time = max(now, self._next_allowed_time)
+            self._next_allowed_time = scheduled_time + self._min_interval
+
+        sleep_for = scheduled_time - now
+        if sleep_for > 0:
+            time.sleep(sleep_for)
+
+
 class RateLimitedThreadPoolExecutor(ThreadPoolExecutor):
-    """ThreadPoolExecutor with rate limiting capabilities."""
-    
+    """Backward-compatible executor wrapper used for parallel chunk execution."""
+
     def __init__(self, max_workers, requests_per_second):
-        """
-        Initialize rate-limited thread pool executor.
-        
-        Args:
-            max_workers: Maximum number of worker threads
-            requests_per_second: Maximum requests per second
-        """
         super().__init__(max_workers=max_workers)
         self.requests_per_second = requests_per_second
-        self.last_request_time = time.time()
-        self.request_count = 0
-
-    def submit(self, fn, *args, **kwargs):
-        """
-        Submit a function to be executed with rate limiting.
-        
-        Args:
-            fn: Function to execute
-            *args: Function arguments
-            **kwargs: Function keyword arguments
-            
-        Returns:
-            Future object
-        """
-        current_time = time.time()
-        time_diff = current_time - self.last_request_time
-
-        if time_diff >= 1:  # Reset counter every second
-            self.request_count = 0
-            self.last_request_time = current_time
-        elif self.request_count >= self.requests_per_second:
-            sleep_time = 1 - time_diff
-            time.sleep(sleep_time)
-            self.request_count = 0
-            self.last_request_time = time.time()
-
-        self.request_count += 1
-        return super().submit(fn, *args, **kwargs)
