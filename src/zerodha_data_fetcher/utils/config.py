@@ -22,6 +22,9 @@ class Config:
     DEFAULT_CHUNK_DAYS = 30
     MAX_WORKERS = 10
     REQUEST_TIMEOUT = 30
+
+    # Instrument cache settings
+    DEFAULT_INSTRUMENT_CACHE_TTL_MINUTES = 1440  # 24 hours
     
     def __init__(self, **kwargs):
         """
@@ -53,7 +56,23 @@ class Config:
     def get_historical_url(self) -> str:
         """Get historical data URL template."""
         return self.ZERODHA_HISTORICAL_URL or ""
-    
+
+    @property
+    def instrument_cache_ttl_minutes(self) -> int:
+        """
+        Instrument cache TTL in minutes.
+
+        Reads ``ZERODHA_INSTRUMENT_CACHE_TTL`` env var, falling back to
+        :pyattr:`DEFAULT_INSTRUMENT_CACHE_TTL_MINUTES` (1440 = 24 h).
+        """
+        env_ttl = os.getenv("ZERODHA_INSTRUMENT_CACHE_TTL")
+        if env_ttl is not None:
+            try:
+                return int(env_ttl)
+            except ValueError:
+                pass
+        return self.DEFAULT_INSTRUMENT_CACHE_TTL_MINUTES
+
     def validate_config(self) -> bool:
         """
         Validate that all required configuration is present.

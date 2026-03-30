@@ -7,7 +7,7 @@ from typing import List, Optional
 import pandas as pd
 
 from ..utils.exceptions import ZerodhaAPIError
-from ..utils.data_loader import load_instrument_data
+from ..utils.data_loader import load_instrument_data, download_instruments, get_cache_path
 
 logger = logging.getLogger(__name__)
 
@@ -20,20 +20,28 @@ class ZerodhaInstrumentManager:
     def __init__(self,
                  equity_scrip_path: Optional[str] = None,
                  commodity_scrip_path: Optional[str] = None,
-                 instrument_id_path: Optional[str] = None):
+                 instrument_id_path: Optional[str] = None,
+                 cache_ttl_minutes: Optional[int] = None):
         self.equity_scrip_path = equity_scrip_path
         self.commodity_scrip_path = commodity_scrip_path
         self.instrument_id_path = instrument_id_path
+
+        # Resolve TTL: param → env var → default (1440 = 24 h)
+        if cache_ttl_minutes is not None:
+            self.cache_ttl_minutes = cache_ttl_minutes
+        else:
+            env_ttl = os.getenv("ZERODHA_INSTRUMENT_CACHE_TTL")
+            self.cache_ttl_minutes = int(env_ttl) if env_ttl is not None else 1440
 
         self._equity_stocks: Optional[List[str]] = None
         self._commodities: Optional[List[str]] = None
         self._instrument_data: Optional[pd.DataFrame] = None
 
-        logger.info("Zerodha Instrument Manager initialized")
+        logger.info("Zerodha Instrument Manager initialized (cache TTL: %d min)", self.cache_ttl_minutes)
         if self.instrument_id_path:
             logger.info("Using custom instrument data path: %s", self.instrument_id_path)
         else:
-            logger.info("Using bundled instrument data")
+            logger.info("Using cached/bundled instrument data")
 
     def _load_equity_stocks(self) -> List[str]:
         """Load equity stock list from Excel file."""
@@ -83,7 +91,9 @@ class ZerodhaInstrumentManager:
                         usecols=['instrument_token', 'tradingsymbol', 'name', 'exchange']
                     )
                 else:
-                    self._instrument_data = load_instrument_data()
+                    self._instrument_data = load_instrument_data(
+                        cache_ttl_minutes=self.cache_ttl_minutes,
+                    )
 
                 expected_columns = ['instrument_token', 'tradingsymbol', 'name', 'exchange']
                 available_columns = self._instrument_data.columns.tolist()
@@ -106,6 +116,24 @@ class ZerodhaInstrumentManager:
                 raise ZerodhaAPIError(f"Failed to load instrument data: {exc}")
 
         return self._instrument_data
+
+    def refresh_instruments(self) -> bool:
+        """
+        Force-download the latest instrument data, ignoring TTL.
+
+        After a successful download the in-memory cache is cleared so the
+        next access reloads from the fresh file.
+
+        Returns:
+            ``True`` if the download succeeded, ``False`` otherwise.
+        """
+        dest = get_cache_path()
+        ok = download_instruments(dest)
+        if ok:
+            # Reset so next _load_instrument_data() re-reads from disk
+            self._instrument_data = None
+            logger.info("Instrument data refreshed successfully.")
+        return ok
 
     def _normalize_commodity_symbol(self, symbol: str) -> Optional[str]:
         """Normalize commodity lookup strings into the bundled data format."""

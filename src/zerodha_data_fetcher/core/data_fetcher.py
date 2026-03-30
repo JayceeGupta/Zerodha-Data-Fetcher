@@ -32,10 +32,11 @@ logger = logging.getLogger(__name__)
 class ZerodhaDataFetcher:
     """Main class for fetching historical data from Zerodha API."""
     
-    def __init__(self, 
+    def __init__(self,
              requests_per_second: int = Config.DEFAULT_REQUESTS_PER_SECOND,
              token_expiry_hours: float = Config.DEFAULT_TOKEN_EXPIRY_HOURS,
              instrument_manager: Optional[ZerodhaInstrumentManager] = None,
+             cache_ttl_minutes: Optional[int] = None,
              # Configuration parameters
              user_id: Optional[str] = None,
              password: Optional[str] = None,
@@ -55,6 +56,7 @@ class ZerodhaDataFetcher:
             requests_per_second: Rate limit for API requests
             token_expiry_hours: Token expiry time in hours
             instrument_manager: Optional instrument manager instance
+            cache_ttl_minutes: Instrument cache TTL in minutes (default: 1440 = 24 h)
             user_id: Zerodha user ID (overrides env var)
             password: Zerodha password (overrides env var)
             user_type: Zerodha user type (overrides env var/default value)
@@ -95,7 +97,9 @@ class ZerodhaDataFetcher:
         
         # Initialize auth manager and instrument manager with custom config
         self.auth_manager = AuthenticationManager(token_expiry_hours, config=self.config)
-        self.instrument_manager = instrument_manager or ZerodhaInstrumentManager()
+        self.instrument_manager = instrument_manager or ZerodhaInstrumentManager(
+            cache_ttl_minutes=cache_ttl_minutes,
+        )
         
         logger.info(f"ZerodhaDataFetcher initialized with {self.requests_per_second} req/sec")
         

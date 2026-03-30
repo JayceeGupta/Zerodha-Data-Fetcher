@@ -6,7 +6,7 @@ from zerodha_data_fetcher.core.instrument_manager import ZerodhaInstrumentManage
 def test_get_instrument_token_returns_stock_token(monkeypatch, sample_instrument_df):
     monkeypatch.setattr(
         "zerodha_data_fetcher.core.instrument_manager.load_instrument_data",
-        lambda: sample_instrument_df.rename(
+        lambda **kwargs: sample_instrument_df.rename(
             columns={
                 "Instrument_Token": "instrument_token",
                 "Name": "tradingsymbol",
@@ -23,7 +23,7 @@ def test_get_instrument_token_returns_stock_token(monkeypatch, sample_instrument
 def test_get_instrument_token_prefers_explicit_exchange(monkeypatch, sample_instrument_df):
     monkeypatch.setattr(
         "zerodha_data_fetcher.core.instrument_manager.load_instrument_data",
-        lambda: sample_instrument_df.rename(
+        lambda **kwargs: sample_instrument_df.rename(
             columns={
                 "Instrument_Token": "instrument_token",
                 "Name": "tradingsymbol",
@@ -40,7 +40,7 @@ def test_get_instrument_token_prefers_explicit_exchange(monkeypatch, sample_inst
 def test_get_instrument_token_returns_none_for_unknown_symbol(monkeypatch, sample_instrument_df):
     monkeypatch.setattr(
         "zerodha_data_fetcher.core.instrument_manager.load_instrument_data",
-        lambda: sample_instrument_df.rename(
+        lambda **kwargs: sample_instrument_df.rename(
             columns={
                 "Instrument_Token": "instrument_token",
                 "Name": "tradingsymbol",
@@ -57,7 +57,7 @@ def test_get_instrument_token_returns_none_for_unknown_symbol(monkeypatch, sampl
 def test_search_symbol_returns_matches_with_limit(monkeypatch, sample_instrument_df):
     monkeypatch.setattr(
         "zerodha_data_fetcher.core.instrument_manager.load_instrument_data",
-        lambda: sample_instrument_df.rename(
+        lambda **kwargs: sample_instrument_df.rename(
             columns={
                 "Instrument_Token": "instrument_token",
                 "Name": "tradingsymbol",
@@ -100,7 +100,7 @@ def test_search_symbol_orders_exact_match_first(monkeypatch, sample_instrument_d
     )
     monkeypatch.setattr(
         "zerodha_data_fetcher.core.instrument_manager.load_instrument_data",
-        lambda: instrument_df,
+        lambda **kwargs: instrument_df,
     )
     manager = ZerodhaInstrumentManager()
 
@@ -112,7 +112,7 @@ def test_search_symbol_orders_exact_match_first(monkeypatch, sample_instrument_d
 def test_validate_symbol_true_for_existing_symbol(monkeypatch, sample_instrument_df):
     monkeypatch.setattr(
         "zerodha_data_fetcher.core.instrument_manager.load_instrument_data",
-        lambda: sample_instrument_df.rename(
+        lambda **kwargs: sample_instrument_df.rename(
             columns={
                 "Instrument_Token": "instrument_token",
                 "Name": "tradingsymbol",
@@ -129,7 +129,7 @@ def test_validate_symbol_true_for_existing_symbol(monkeypatch, sample_instrument
 def test_validate_symbol_false_for_missing_symbol(monkeypatch, sample_instrument_df):
     monkeypatch.setattr(
         "zerodha_data_fetcher.core.instrument_manager.load_instrument_data",
-        lambda: sample_instrument_df.rename(
+        lambda **kwargs: sample_instrument_df.rename(
             columns={
                 "Instrument_Token": "instrument_token",
                 "Name": "tradingsymbol",
@@ -146,7 +146,7 @@ def test_validate_symbol_false_for_missing_symbol(monkeypatch, sample_instrument
 def test_fetch_instrument_ids_for_equity_uses_loaded_symbols(monkeypatch, sample_instrument_df):
     monkeypatch.setattr(
         "zerodha_data_fetcher.core.instrument_manager.load_instrument_data",
-        lambda: sample_instrument_df.rename(
+        lambda **kwargs: sample_instrument_df.rename(
             columns={
                 "Instrument_Token": "instrument_token",
                 "Name": "tradingsymbol",

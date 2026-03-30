@@ -197,6 +197,36 @@ with ThreadPoolExecutor(max_workers=len(accounts)) as executor:
 print(f"\n🎉 Completed fetching data for {len(all_results)} symbols across {len(accounts)} accounts")
 ```
 
+## Instrument Data Caching
+
+The package bundles a snapshot of Zerodha's instrument list and keeps a
+fresh copy in your local cache directory.
+
+### How it works
+- On first use, the package attempts to download the latest instrument data
+  from `https://api.kite.trade/instruments`.
+- If the cached file is younger than the TTL (default: 1440 minutes / 24 h),
+  no download is attempted.
+- If the download fails (no internet, API unavailable), the bundled snapshot
+  is used as a fallback and a warning is logged.
+
+### Configuration
+| Method | Example |
+|--------|---------|
+| Env var | `ZERODHA_INSTRUMENT_CACHE_TTL=60` (minutes) |
+| Constructor | `ZerodhaDataFetcher(cache_ttl_minutes=60)` |
+| Constructor | `ZerodhaInstrumentManager(cache_ttl_minutes=60)` |
+
+### Manual refresh
+```python
+from zerodha_data_fetcher import refresh_instruments
+refresh_instruments()  # ignores TTL, always downloads
+```
+
+Cache location:
+- **Windows**: `%LOCALAPPDATA%\zerodha_data_fetcher\Cache\`
+- **Linux/macOS**: `~/.cache/zerodha_data_fetcher/`
+
 ## Configuration
 
 ### Environment Variables
@@ -213,6 +243,7 @@ print(f"\n🎉 Completed fetching data for {len(all_results)} symbols across {le
 | `ZERODHA_HISTORICAL_URL` | Historical data endpoint template | No | [Default template] |
 | `ZERODHA_KEYRING_TOKEN_KEY` | Keyring token storage key | No | `zerodha_auth_token` |
 | `ZERODHA_KEYRING_ENCRYPTION_KEY` | Keyring encryption key | No | `zerodha_encryption_key` |
+| `ZERODHA_INSTRUMENT_CACHE_TTL` | Instrument cache TTL in minutes | No | `1440` (24 h) |
 
 **Note**: Only `ZERODHA_USER_ID`, `ZERODHA_PASSWORD`, and `ZERODHA_TOTP_SECRET` are required to work. All other variables have sensible defaults and can be overridden during class instantiation if needed.
 
