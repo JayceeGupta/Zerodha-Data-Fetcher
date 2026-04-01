@@ -55,7 +55,10 @@ from datetime import date, timedelta
 setup_logging(log_level="INFO", log_file="logs/zerodha_fetcher.log")
 
 # Initialize the fetcher
-fetcher = ZerodhaDataFetcher(requests_per_second=3)
+fetcher = ZerodhaDataFetcher(
+    requests_per_second=3,
+    chunk_failure_mode="strict",  # default
+)
 
 # Define date range
 end_date = date.today()
@@ -92,6 +95,9 @@ instrument_info = fetcher.get_instrument_info("INFY")
 print("Instrument info:", instrument_info)
 ```
 
+Authentication logs are sanitized by default. TOTP values, raw auth response bodies,
+headers, cookies, and encrypted token material are never written to the logs.
+
 ### 4. Runtime Configuration Override
 
 You can override environment variables during class instantiation:
@@ -100,12 +106,64 @@ You can override environment variables during class instantiation:
 # Override credentials at runtime (useful when env vars become obsolete)
 fetcher = ZerodhaDataFetcher(
     requests_per_second=3,
+    chunk_failure_mode="strict",
     user_id="override_user_id",
     password="override_password", 
     totp_secret="override_totp_secret",
     user_type="user_id"  # or "corporate"
 )
 ```
+
+## Historical Fetch Failure Modes
+
+Historical data fetching now defaults to strict correctness.
+
+- `chunk_failure_mode="strict"`: any failed chunk raises `DataFetchError`. No partial data is returned.
+- `chunk_failure_mode="partial"`: successful chunks are returned, failed ranges are summarized in one warning log, and an exception is raised only if all chunks fail.
+
+You can set the default on the fetcher instance or override it per call:
+
+```python
+fetcher = ZerodhaDataFetcher(chunk_failure_mode="strict")
+
+strict_data = fetcher.fetch_historical_data(
+    "INFY",
+    start_date=start_date,
+    end_date=end_date,
+)
+
+partial_data = fetcher.fetch_historical_data(
+    "INFY",
+    start_date=start_date,
+    end_date=end_date,
+    chunk_failure_mode="partial",
+)
+```
+
+## Logging
+
+`setup_logging()` now uses different defaults for console and file output:
+
+- Console: compact human-readable logs such as `20:30:29 INFO zerodha_data_fetcher.core.data_fetcher fetch_historical_data: Data fetch completed successfully`
+- File: richer logs with timestamp, logger, function, line number, and thread name
+
+You can customize each handler independently:
+
+```python
+setup_logging(
+    log_level="INFO",
+    log_file="logs/zerodha_fetcher.log",
+    console_format="%(asctime)s %(levelname)s %(message)s",
+    file_format="%(asctime)s | %(levelname)s | %(name)s | %(funcName)s:%(lineno)d | %(threadName)s | %(message)s",
+)
+```
+
+Backward compatibility is preserved:
+
+- `log_format=...` still overrides both handlers
+- `console_format` and `file_format` can be set independently when `log_format` is not provided
+- Default console dates use `%H:%M:%S`
+- Default file dates use `%Y-%m-%d %H:%M:%S`
 
 ## Multi-Account Parallel Processing
 
@@ -217,6 +275,9 @@ fresh copy in your local cache directory.
 | Constructor | `ZerodhaDataFetcher(cache_ttl_minutes=60)` |
 | Constructor | `ZerodhaInstrumentManager(cache_ttl_minutes=60)` |
 
+If `ZERODHA_INSTRUMENT_CACHE_TTL` is invalid, the library logs one warning and
+falls back to `1440` minutes instead of crashing.
+
 ### Manual refresh
 ```python
 from zerodha_data_fetcher import refresh_instruments
@@ -251,6 +312,7 @@ Cache location:
 
 - `requests_per_second`: API rate limit (1-10, default: 2)
 - `token_expiry_hours`: Token validity period (default: 6)
+- `chunk_failure_mode`: `"strict"` by default, or `"partial"` to opt into partial historical fetches
 - `user_id`: Override environment variable
 - `password`: Override environment variable  
 - `totp_secret`: Override environment variable
@@ -307,7 +369,7 @@ Main class for fetching historical data.
 
 #### Methods
 
-- `fetch_historical_data(ticker_token, start_date, end_date, timeframe='minute')`: Fetch historical data
+- `fetch_historical_data(ticker_token, start_date, end_date, timeframe='minute', chunk_failure_mode=None)`: Fetch historical data with strict-by-default chunk failure handling
 - `search_symbols(partial_name, limit=10)`: Search for trading symbols  
 - `get_instrument_info(symbol)`: Get instrument information
 

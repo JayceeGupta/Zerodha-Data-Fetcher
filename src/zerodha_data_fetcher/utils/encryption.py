@@ -28,7 +28,7 @@ class TokenEncryption:
         Returns:
             bytes: The encryption key as bytes.
         """
-        logger.info("Attempting to retrieve encryption key from keyring")
+        logger.debug("Retrieving encryption key from keyring")
         encryption_key = keyring.get_password(self.encryption_key, "key")
 
         if encryption_key is None:
@@ -54,7 +54,7 @@ class TokenEncryption:
         Raises:
             Exception: If there is an error during the encryption process.
         """
-        logger.info("Starting token encryption process")
+        logger.debug("Encrypting token for keyring storage")
         try:
             fernet = Fernet(self.get_encryption_key())
             encrypted_token = fernet.encrypt(token.encode()).decode()
@@ -77,7 +77,7 @@ class TokenEncryption:
         Raises:
             Exception: If there is an error during the decryption process.
         """
-        logger.info("Starting token decryption process")
+        logger.debug("Decrypting token from keyring storage")
         try:
             fernet = Fernet(self.get_encryption_key())
             decrypted_token = fernet.decrypt(encrypted_token.encode()).decode()

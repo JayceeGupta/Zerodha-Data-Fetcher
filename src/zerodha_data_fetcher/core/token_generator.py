@@ -1,13 +1,13 @@
 """Token generation functionality for Zerodha API authentication."""
 
-import os
-import sys
-import logging
 import json
-from typing import Dict, Union, List, Any, Optional
+import logging
+import os
+from typing import Dict
 
 import pyotp
-from requests import Session, Response
+from requests import Session
+from requests.exceptions import HTTPError
 from dotenv import load_dotenv
 
 from ..utils.exceptions import AuthenticationError
@@ -44,22 +44,17 @@ class ZerodhaTokenGenerator:
         Raises:
             AuthenticationError: If there is any error generating the TOTP value.
         """
-        logger.debug("Starting TOTP generation")
+        logger.debug("Generating TOTP for authentication")
         
         try:
             totp_secret = key or self.config.ZERODHA_TOTP_SECRET
-            logger.debug("Retrieved TOTP secret")
             
             if totp_secret is None:
                 raise AuthenticationError("TOTP secret not available")
                 
             totp = pyotp.TOTP(totp_secret, interval=30)
             logger.debug("TOTP object created successfully")
-            
-            current_otp = totp.now()
-            logger.info(f"Generated TOTP value: {current_otp}")
-            
-            return current_otp
+            return totp.now()
             
         except Exception as e:
             logger.error(f"Failed to generate TOTP: {str(e)}")
@@ -82,7 +77,7 @@ class ZerodhaTokenGenerator:
         Raises:
             AuthenticationError: If authentication fails at any step
         """
-        logger.info("Starting authentication token generation process")
+        logger.info("Starting auth flow")
         
         try:
             # Get credentials from validated environment variables
@@ -95,7 +90,7 @@ class ZerodhaTokenGenerator:
             login_url = self.config.ZERODHA_LOGIN_URL
             two_factor_url = self.config.ZERODHA_2FA_URL
 
-            logger.debug("Environment variables validated successfully")
+            logger.debug("Authentication configuration validated successfully")
 
             # Generate TOTP
             totp_value = self.get_totp(totp_secret)
@@ -105,7 +100,7 @@ class ZerodhaTokenGenerator:
             session = Session()
             start_session_response = session.get(base_url)
             start_session_response.raise_for_status()
-            logger.debug("Initial session started successfully")
+            logger.debug("Initial auth session started successfully")
 
             # Prepare headers
             generic_headers: Dict[str, str] = {
@@ -120,27 +115,20 @@ class ZerodhaTokenGenerator:
                 "password": password,
                 "type": user_type
             }
-            logger.debug("Prepared login payload")
-
             login_response = session.post(login_url, data=login_payload, headers=generic_headers)
             login_response.raise_for_status()
-            logger.info("Login request successful")
-            
-            logger.debug(f"Login response Text: {login_response.text}")
-            logger.debug(f"Login response Headers: {login_response.headers}")
-            logger.debug(f"Login response Content: {login_response.content}")
-            logger.debug(f"Login response Status Code: {login_response.status_code}")
+            logger.info("Login request succeeded")
             
             # Parse login response
             login_data = json.loads(login_response.content)
 
             if not login_data.get('data') or not login_data['data'].get('request_id'):
                 error_msg = login_data.get('message', 'Unknown error')
-                logger.error(f"Login failed: {error_msg}")
+                logger.error("Login response missing request_id: %s", error_msg)
                 raise AuthenticationError(f"Login failed: {error_msg}")
 
             request_id = login_data['data']['request_id']
-            logger.debug(f"Retrieved request ID: {request_id}")
+            logger.debug("Received login request identifier")
 
             # 2FA request
             two_factor_payload = {    
@@ -149,25 +137,27 @@ class ZerodhaTokenGenerator:
                 "twofa_value": totp_value,
                 "twofatype": "totp"
             }
-            logger.debug("Prepared 2FA payload")
-
             two_factor_response = session.post(two_factor_url, data=two_factor_payload, headers=generic_headers)
             two_factor_response.raise_for_status()
-            logger.info("2FA authentication successful")
+            logger.info("2FA succeeded")
             
             # Extract enctoken from cookies
             if 'enctoken' not in session.cookies:
-                logger.error("No enctoken received in response cookies")
+                logger.error("Authentication response did not include an enctoken cookie")
                 raise AuthenticationError("Authentication failed: No enctoken received")
                 
-            logger.info("Successfully retrieved authentication token")
+            logger.info("Authentication token acquired")
             return session.cookies['enctoken']
             
         except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse API response: {str(e)}")
+            logger.error("Failed to parse authentication response JSON")
             raise AuthenticationError(f"JSON parsing error: {str(e)}")
+        except HTTPError as e:
+            status_code = e.response.status_code if e.response is not None else "unknown"
+            logger.error("Authentication request failed with HTTP status %s", status_code)
+            raise AuthenticationError(f"Token generation failed: {str(e)}")
         except Exception as e:
-            logger.error(f"Authentication failed: {str(e)}")
+            logger.error("Authentication failed: %s", str(e))
             raise AuthenticationError(f"Token generation failed: {str(e)}")
 
 

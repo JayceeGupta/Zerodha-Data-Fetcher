@@ -1,11 +1,11 @@
 """Instrument ID management for Zerodha symbols."""
 
-import os
 import logging
 from typing import List, Optional
 
 import pandas as pd
 
+from ..utils.config import Config
 from ..utils.exceptions import ZerodhaAPIError
 from ..utils.data_loader import load_instrument_data, download_instruments, get_cache_path
 
@@ -30,8 +30,7 @@ class ZerodhaInstrumentManager:
         if cache_ttl_minutes is not None:
             self.cache_ttl_minutes = cache_ttl_minutes
         else:
-            env_ttl = os.getenv("ZERODHA_INSTRUMENT_CACHE_TTL")
-            self.cache_ttl_minutes = int(env_ttl) if env_ttl is not None else 1440
+            self.cache_ttl_minutes = Config.resolve_instrument_cache_ttl_minutes()
 
         self._equity_stocks: Optional[List[str]] = None
         self._commodities: Optional[List[str]] = None

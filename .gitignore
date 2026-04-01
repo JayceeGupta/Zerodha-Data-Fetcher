@@ -35,3 +35,4 @@ uv.lock
 risk-mitigation-plan*.md
 plan-*.md
 .claude
+test.py

@@ -1,14 +1,15 @@
 """Utility to load package data files with local caching and auto-refresh."""
 
-import os
-import time
 import logging
+import time
 from pathlib import Path
 from typing import Optional
 
 import pandas as pd
 import requests
 from platformdirs import user_cache_path
+
+from .config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -134,8 +135,7 @@ def load_instrument_data(
 
     # Resolve TTL
     if cache_ttl_minutes is None:
-        env_ttl = os.getenv("ZERODHA_INSTRUMENT_CACHE_TTL")
-        cache_ttl_minutes = int(env_ttl) if env_ttl is not None else _DEFAULT_TTL_MINUTES
+        cache_ttl_minutes = Config.resolve_instrument_cache_ttl_minutes()
 
     cache_file = get_cache_path(filename)
     age = get_cache_age_minutes(cache_file)
