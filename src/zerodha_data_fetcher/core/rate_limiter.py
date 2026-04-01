@@ -32,6 +32,19 @@ class RequestRateLimiter:
 class RateLimitedThreadPoolExecutor(ThreadPoolExecutor):
     """Backward-compatible executor wrapper used for parallel chunk execution."""
 
-    def __init__(self, max_workers, requests_per_second):
-        super().__init__(max_workers=max_workers)
+    def __init__(self, max_workers=None, requests_per_second=1, **kwargs):
+        if requests_per_second <= 0:
+            raise ValueError("requests_per_second must be greater than 0")
+
+        super().__init__(max_workers=max_workers, **kwargs)
         self.requests_per_second = requests_per_second
+        self._rate_limiter = RequestRateLimiter(requests_per_second)
+
+    def submit(self, fn, /, *args, **kwargs):
+        """Submit work while enforcing shared request pacing across workers."""
+
+        def rate_limited_fn(*wrapped_args, **wrapped_kwargs):
+            self._rate_limiter.wait_for_slot()
+            return fn(*wrapped_args, **wrapped_kwargs)
+
+        return super().submit(rate_limited_fn, *args, **kwargs)

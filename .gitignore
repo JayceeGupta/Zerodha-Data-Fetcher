@@ -3,25 +3,27 @@
 __pycache__/
 
 # Python package files
-*.egg-info
-dist
+*.egg-info/
+dist/
 build/
 
 # Virtual environments
 .env
-.venv
+.venv/
 
 # Directories
-legacy
-logs
+legacy/
+logs/
 .pytest_cache/
 htmlcov/
 
-# Test files
-test_without_install.py
-commands.txt
+# Coverage
 .coverage
 .coverage.*
+
+# Test / scratch files
+test_without_install.py
+commands.txt
 
 # Example files
 basic_usage.py
@@ -31,3 +33,6 @@ uv.lock
 
 # Local planning / scratch docs
 risk-mitigation-plan*.md
+plan-*.md
+.claude
+test.py

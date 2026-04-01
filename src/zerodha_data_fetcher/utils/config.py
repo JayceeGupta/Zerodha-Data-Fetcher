@@ -1,10 +1,14 @@
 """Configuration management for Zerodha Data Fetcher."""
 
+import logging
 import os
-from typing import Optional, Dict, Any
+from typing import Dict
+
 from dotenv import load_dotenv
 
 load_dotenv()
+logger = logging.getLogger(__name__)
+_WARNED_INVALID_TTL_VALUES: set[str] = set()
 
 class Config:
     """Configuration settings for Zerodha Data Fetcher."""
@@ -22,6 +26,9 @@ class Config:
     DEFAULT_CHUNK_DAYS = 30
     MAX_WORKERS = 10
     REQUEST_TIMEOUT = 30
+
+    # Instrument cache settings
+    DEFAULT_INSTRUMENT_CACHE_TTL_MINUTES = 1440  # 24 hours
     
     def __init__(self, **kwargs):
         """
@@ -53,7 +60,46 @@ class Config:
     def get_historical_url(self) -> str:
         """Get historical data URL template."""
         return self.ZERODHA_HISTORICAL_URL or ""
-    
+
+    @classmethod
+    def resolve_instrument_cache_ttl_minutes(cls, env_value: str | None = None) -> int:
+        """
+        Resolve the instrument cache TTL from configuration.
+
+        Args:
+            env_value: Optional explicit environment value to parse. When omitted,
+                reads ``ZERODHA_INSTRUMENT_CACHE_TTL`` from the environment.
+
+        Returns:
+            int: Cache TTL in minutes.
+        """
+        raw_value = os.getenv("ZERODHA_INSTRUMENT_CACHE_TTL") if env_value is None else env_value
+        if raw_value is None or str(raw_value).strip() == "":
+            return cls.DEFAULT_INSTRUMENT_CACHE_TTL_MINUTES
+
+        try:
+            return int(raw_value)
+        except (TypeError, ValueError):
+            normalized = str(raw_value)
+            if normalized not in _WARNED_INVALID_TTL_VALUES:
+                logger.warning(
+                    "Invalid ZERODHA_INSTRUMENT_CACHE_TTL=%r; falling back to %d minutes",
+                    raw_value,
+                    cls.DEFAULT_INSTRUMENT_CACHE_TTL_MINUTES,
+                )
+                _WARNED_INVALID_TTL_VALUES.add(normalized)
+            return cls.DEFAULT_INSTRUMENT_CACHE_TTL_MINUTES
+
+    @property
+    def instrument_cache_ttl_minutes(self) -> int:
+        """
+        Instrument cache TTL in minutes.
+
+        Reads ``ZERODHA_INSTRUMENT_CACHE_TTL`` env var, falling back to
+        :pyattr:`DEFAULT_INSTRUMENT_CACHE_TTL_MINUTES` (1440 = 24 h).
+        """
+        return self.resolve_instrument_cache_ttl_minutes()
+
     def validate_config(self) -> bool:
         """
         Validate that all required configuration is present.

@@ -1,0 +1,61 @@
+name: Publish to PyPI
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+jobs:
+  # ------------------------------------------------------------------
+  # Job 1: Run test suite across Python versions
+  # ------------------------------------------------------------------
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Run tests
+        run: uv run pytest
+
+  # ------------------------------------------------------------------
+  # Job 2: Build & publish (only after tests pass)
+  # ------------------------------------------------------------------
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
+
+    permissions:
+      id-token: write  # required for PyPI Trusted Publishing (OIDC)
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+
+      - name: Download latest instrument CSV
+        run: |
+          curl -fSL https://api.kite.trade/instruments \
+            -o src/zerodha_data_fetcher/utils/data/Kite_Instrument_ID.csv
+
+      - name: Build package
+        run: uv build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

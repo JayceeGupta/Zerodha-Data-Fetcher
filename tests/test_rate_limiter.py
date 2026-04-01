@@ -49,9 +49,25 @@ def test_wait_for_slot_second_call_sleeps_for_interval(monkeypatch):
     assert sleep_calls == [0.5]
 
 
-def test_rate_limited_executor_stores_requested_rate():
-    executor = RateLimitedThreadPoolExecutor(max_workers=2, requests_per_second=4)
-    try:
-        assert executor.requests_per_second == 4
-    finally:
-        executor.shutdown(wait=False)
+def test_rate_limited_executor_rejects_invalid_rate():
+    with pytest.raises(ValueError):
+        RateLimitedThreadPoolExecutor(max_workers=2, requests_per_second=0)
+
+
+def test_rate_limited_executor_waits_before_each_submitted_task(monkeypatch):
+    wait_calls = []
+
+    def fake_wait(self):
+        wait_calls.append(id(self))
+
+    monkeypatch.setattr(RequestRateLimiter, "wait_for_slot", fake_wait)
+
+    with RateLimitedThreadPoolExecutor(max_workers=2, requests_per_second=4) as executor:
+        future_one = executor.submit(lambda value, suffix=None: f"{value}-{suffix}", "a", suffix="1")
+        future_two = executor.submit(lambda value: value.upper(), "b")
+
+        assert future_one.result() == "a-1"
+        assert future_two.result() == "B"
+
+    assert len(wait_calls) == 2
+    assert len(set(wait_calls)) == 1

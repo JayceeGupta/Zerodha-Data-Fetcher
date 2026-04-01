@@ -107,11 +107,16 @@ class FakeFuture:
     def __init__(self, result_value: Any = None, exception: Optional[BaseException] = None):
         self._result_value = result_value
         self._exception = exception
+        self.cancel_called = False
 
     def result(self) -> Any:
         if self._exception is not None:
             raise self._exception
         return self._result_value
+
+    def cancel(self) -> bool:
+        self.cancel_called = True
+        return True
 
 
 class FakeExecutor:
@@ -125,6 +130,7 @@ class FakeExecutor:
         self.requests_per_second = requests_per_second
         self.future_factory = future_factory
         self.submitted_params = []
+        self.shutdown_called = False
 
     def __enter__(self) -> "FakeExecutor":
         return self
@@ -137,6 +143,9 @@ class FakeExecutor:
         if self.future_factory is not None:
             return self.future_factory(fn, params)
         return FakeFuture(result_value=fn(params))
+
+    def shutdown(self, wait: bool = True, cancel_futures: bool = False) -> None:
+        self.shutdown_called = True
 
 
 def fake_as_completed(future_to_params: Dict[FakeFuture, tuple]) -> Iterable[FakeFuture]:

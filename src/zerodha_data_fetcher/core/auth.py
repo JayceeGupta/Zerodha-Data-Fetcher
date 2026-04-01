@@ -1,15 +1,14 @@
 """Authentication management for Zerodha API."""
 
-import os
-import time
 import logging
+import time
 from datetime import date
 from typing import Optional
 
 import keyring
 
 from ..utils.config import Config
-from ..utils.exceptions import AuthenticationError, TokenExpiredError
+from ..utils.exceptions import AuthenticationError
 from ..utils.encryption import TokenEncryption
 from .token_generator import ZerodhaTokenGenerator
 
@@ -26,6 +25,58 @@ class AuthenticationManager:
         self.token_generator = ZerodhaTokenGenerator(config=self.config)
         self.token_encryption = TokenEncryption(self.config.ZERODHA_KEYRING_ENCRYPTION_KEY)
 
+    @property
+    def _current_user_id(self) -> str:
+        """Return the configured user ID for scoping cached credentials."""
+        return self.config.get_user_id()
+
+    def _scoped_account_name(self, field: str) -> str:
+        """Return the user-scoped account name used in keyring storage."""
+        return f"{field}:{self._current_user_id}"
+
+    def _read_token_bundle(self, token_account: str, date_account: str, timestamp_account: str) -> tuple[Optional[str], Optional[str], Optional[str]]:
+        """Read token metadata from keyring."""
+        return (
+            keyring.get_password(self.token_key, token_account),
+            keyring.get_password(self.token_key, date_account),
+            keyring.get_password(self.token_key, timestamp_account),
+        )
+
+    def _write_token_bundle(self, encrypted_token: str, token_date: str, token_timestamp: str) -> None:
+        """Persist a user-scoped token bundle in keyring."""
+        keyring.set_password(self.token_key, self._scoped_account_name("token"), encrypted_token)
+        keyring.set_password(self.token_key, self._scoped_account_name("date"), token_date)
+        keyring.set_password(self.token_key, self._scoped_account_name("timestamp"), token_timestamp)
+
+    def _delete_password_best_effort(self, account_name: str) -> None:
+        """Delete a keyring entry while tolerating missing backends/values."""
+        try:
+            keyring.delete_password(self.token_key, account_name)
+        except Exception:
+            logger.debug("Keyring entry %s did not need deletion", account_name)
+
+    def _migrate_legacy_token_if_applicable(self) -> tuple[Optional[str], Optional[str], Optional[str]]:
+        """
+        Read the legacy shared token layout when it belongs to the current user.
+
+        On success, rewrites the data into the new per-user layout.
+        """
+        legacy_user_id = keyring.get_password(self.token_key, "userid")
+        if legacy_user_id != self._current_user_id:
+            return None, None, None
+
+        encrypted_token, token_date, token_timestamp = self._read_token_bundle("token", "date", "timestamp")
+        if not (encrypted_token and token_date and token_timestamp):
+            return None, None, None
+
+        self._write_token_bundle(encrypted_token, token_date, token_timestamp)
+        logger.info("Migrated legacy cached token into user-scoped storage")
+        self._delete_password_best_effort("token")
+        self._delete_password_best_effort("date")
+        self._delete_password_best_effort("timestamp")
+        self._delete_password_best_effort("userid")
+        return encrypted_token, token_date, token_timestamp
+
     def get_auth_token(self) -> str:
         """
         Retrieves an authentication token for accessing the Zerodha API.
@@ -41,25 +92,28 @@ class AuthenticationManager:
             today = date.today().strftime('%Y-%m-%d')
             current_time = time.time()
             
-            logger.debug(f"Getting auth token for date: {today}")
+            logger.debug("Looking up auth token for user %s on %s", self._current_user_id, today)
             
-            # Try to retrieve stored token
-            encrypted_token = keyring.get_password(self.token_key, "token")
-            token_date = keyring.get_password(self.token_key, "date")
-            token_timestamp = keyring.get_password(self.token_key, "timestamp")
+            encrypted_token, token_date, token_timestamp = self._read_token_bundle(
+                self._scoped_account_name("token"),
+                self._scoped_account_name("date"),
+                self._scoped_account_name("timestamp"),
+            )
+
+            if not (encrypted_token and token_date and token_timestamp):
+                encrypted_token, token_date, token_timestamp = self._migrate_legacy_token_if_applicable()
             
             if encrypted_token and token_date and token_timestamp:
-                logger.debug("Found token data in keyring")
+                logger.debug("Found cached token metadata in keyring")
                 time_elapsed = current_time - float(token_timestamp)
-                logger.debug(f"Time elapsed since last token: {time_elapsed} seconds")
-                logger.debug(f"Token expiry time: {expiry_seconds} seconds")
+                logger.debug("Cached token age: %.2f seconds, expiry window: %.2f seconds", time_elapsed, expiry_seconds)
                 if token_date == today and time_elapsed < expiry_seconds:
-                    logger.info("Found valid token for today")
+                    logger.info("Using cached auth token for current user")
                     return self.token_encryption.decrypt_token(encrypted_token)
                 else:
-                    logger.debug("Stored token is outdated")
+                    logger.debug("Cached token is expired or from a different day")
             else:
-                logger.debug("No valid token data found in keyring")
+                logger.debug("No user-scoped token data found in keyring")
                 
         except Exception as e:
             logger.error(f"Error retrieving token: {str(e)}")
@@ -80,12 +134,9 @@ class AuthenticationManager:
             today = date.today().strftime('%Y-%m-%d')
             current_time = time.time()
             
-            keyring.set_password(self.token_key, "token", encrypted_token)
-            keyring.set_password(self.token_key, "date", today)
-            keyring.set_password(self.token_key, "timestamp", str(current_time))
-            keyring.set_password(self.token_key, "userid", self.config.get_user_id())
+            self._write_token_bundle(encrypted_token, today, str(current_time))
             
-            logger.info("Successfully saved new token to keyring")
+            logger.info("Token cached for current user")
             return new_token
             
         except Exception as e:
@@ -95,9 +146,13 @@ class AuthenticationManager:
     def invalidate_token(self) -> None:
         """Invalidate the current stored token."""
         try:
-            keyring.delete_password(self.token_key, "token")
-            keyring.delete_password(self.token_key, "date") 
-            keyring.delete_password(self.token_key, "timestamp")
-            logger.info("Token invalidated successfully")
+            self._delete_password_best_effort(self._scoped_account_name("token"))
+            self._delete_password_best_effort(self._scoped_account_name("date"))
+            self._delete_password_best_effort(self._scoped_account_name("timestamp"))
+            self._delete_password_best_effort("token")
+            self._delete_password_best_effort("date")
+            self._delete_password_best_effort("timestamp")
+            self._delete_password_best_effort("userid")
+            logger.info("Token invalidated successfully for current user")
         except Exception as e:
             logger.warning(f"Failed to invalidate token: {str(e)}")

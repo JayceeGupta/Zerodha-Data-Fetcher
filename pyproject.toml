@@ -40,6 +40,7 @@ dependencies = [
     "cryptography>=3.4.0",
     "Brotli>=1.0.9",
     "python-dotenv>=0.19.0",
+    "platformdirs>=3.0.0",
 ]
 
 [project.optional-dependencies]

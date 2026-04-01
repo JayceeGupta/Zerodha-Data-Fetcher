@@ -1,4 +1,5 @@
 import json
+import logging
 from datetime import date
 
 import pandas as pd
@@ -7,6 +8,7 @@ import requests
 from dateutil.relativedelta import relativedelta
 
 from zerodha_data_fetcher.core import data_fetcher as data_fetcher_module
+from zerodha_data_fetcher.utils import helpers as helpers_module
 from zerodha_data_fetcher.utils.config import Config
 from zerodha_data_fetcher.utils.exceptions import (
     AuthenticationError,
@@ -27,6 +29,11 @@ class ResponseStub:
         return self._json_data
 
 
+@pytest.fixture(autouse=True)
+def disable_retry_sleep(monkeypatch):
+    monkeypatch.setattr(helpers_module.time, "sleep", lambda _seconds: None)
+
+
 def test_init_clamps_requests_per_second_to_minimum(fetcher_factory):
     fetcher = fetcher_factory(requests_per_second=0)
 
@@ -45,6 +52,17 @@ def test_init_uses_supplied_instrument_manager(fetcher_factory):
     fetcher = fetcher_factory(instrument_manager=instrument_manager)
 
     assert fetcher.instrument_manager is instrument_manager
+
+
+def test_init_defaults_chunk_failure_mode_to_strict(fetcher_factory):
+    fetcher = fetcher_factory()
+
+    assert fetcher.chunk_failure_mode == "strict"
+
+
+def test_init_rejects_invalid_chunk_failure_mode(fetcher_factory):
+    with pytest.raises(ValueError, match="chunk_failure_mode"):
+        fetcher_factory(chunk_failure_mode="invalid")
 
 
 def test_validate_ticker_token_returns_true_when_chunk_fetch_succeeds(fetcher_factory, monkeypatch):
@@ -87,6 +105,28 @@ def test_validate_ticker_token_invalidates_and_retries_for_token_exception(fetch
     monkeypatch.setattr(fetcher, "_fetch_data_chunk", flaky_chunk)
 
     assert fetcher._validate_ticker_token(12345) is True
+    assert invalidations["count"] == 1
+    assert calls["count"] == 2
+
+
+def test_validate_ticker_token_returns_false_after_second_token_exception(fetcher_factory, monkeypatch):
+    fetcher = fetcher_factory()
+    calls = {"count": 0}
+    invalidations = {"count": 0}
+    monkeypatch.setattr(fetcher.auth_manager, "get_auth_token", lambda: "token")
+    monkeypatch.setattr(
+        fetcher.auth_manager,
+        "invalidate_token",
+        lambda: invalidations.__setitem__("count", invalidations["count"] + 1),
+    )
+
+    def always_expired(_params):
+        calls["count"] += 1
+        raise Exception('Response: {"status":"error","error_type":"TokenException","message":"expired"}')
+
+    monkeypatch.setattr(fetcher, "_fetch_data_chunk", always_expired)
+
+    assert fetcher._validate_ticker_token(12345) is False
     assert invalidations["count"] == 1
     assert calls["count"] == 2
 
@@ -211,7 +251,6 @@ def test_fetch_data_chunk_returns_empty_dataframe_when_no_candles(fetcher_factor
 
 def test_fetch_data_chunk_raises_for_non_200_response(fetcher_factory, monkeypatch):
     fetcher = fetcher_factory()
-    monkeypatch.setattr(data_fetcher_module.time, "sleep", lambda _seconds: None)
     calls = {"count": 0}
 
     def fake_get(*args, **kwargs):
@@ -230,7 +269,6 @@ def test_fetch_data_chunk_raises_for_non_200_response(fetcher_factory, monkeypat
 
 def test_fetch_data_chunk_raises_for_invalid_response_structure(fetcher_factory, monkeypatch):
     fetcher = fetcher_factory()
-    monkeypatch.setattr(data_fetcher_module.time, "sleep", lambda _seconds: None)
     monkeypatch.setattr(
         data_fetcher_module.requests,
         "get",
@@ -245,7 +283,6 @@ def test_fetch_data_chunk_raises_for_invalid_response_structure(fetcher_factory,
 
 def test_fetch_data_chunk_wraps_connection_error(fetcher_factory, monkeypatch):
     fetcher = fetcher_factory()
-    monkeypatch.setattr(data_fetcher_module.time, "sleep", lambda _seconds: None)
     monkeypatch.setattr(
         data_fetcher_module.requests,
         "get",
@@ -260,7 +297,6 @@ def test_fetch_data_chunk_wraps_connection_error(fetcher_factory, monkeypatch):
 
 def test_fetch_data_chunk_wraps_timeout_error(fetcher_factory, monkeypatch):
     fetcher = fetcher_factory()
-    monkeypatch.setattr(data_fetcher_module.time, "sleep", lambda _seconds: None)
     monkeypatch.setattr(
         data_fetcher_module.requests,
         "get",
@@ -275,7 +311,6 @@ def test_fetch_data_chunk_wraps_timeout_error(fetcher_factory, monkeypatch):
 
 def test_fetch_data_chunk_wraps_request_exception(fetcher_factory, monkeypatch):
     fetcher = fetcher_factory()
-    monkeypatch.setattr(data_fetcher_module.time, "sleep", lambda _seconds: None)
     monkeypatch.setattr(
         data_fetcher_module.requests,
         "get",
@@ -290,7 +325,6 @@ def test_fetch_data_chunk_wraps_request_exception(fetcher_factory, monkeypatch):
 
 def test_fetch_data_chunk_wraps_json_decode_error(fetcher_factory, monkeypatch):
     fetcher = fetcher_factory()
-    monkeypatch.setattr(data_fetcher_module.time, "sleep", lambda _seconds: None)
     monkeypatch.setattr(
         data_fetcher_module.requests,
         "get",
@@ -404,10 +438,7 @@ def test_generate_date_ranges_returns_empty_when_start_equals_end(fetcher_factor
     ) == []
 
 
-def test_fetch_historical_data_returns_empty_dataframe_when_all_chunks_empty(
-    fetcher_factory,
-    monkeypatch,
-):
+def test_fetch_historical_data_returns_empty_dataframe_when_all_chunks_empty(fetcher_factory, monkeypatch):
     from conftest import FakeExecutor, fake_as_completed
 
     fetcher = fetcher_factory()
@@ -431,11 +462,8 @@ def test_fetch_historical_data_returns_empty_dataframe_when_all_chunks_empty(
     assert result.empty is True
 
 
-def test_fetch_historical_data_combines_sorts_and_formats_chunk_results(
-    fetcher_factory,
-    monkeypatch,
-):
-    from conftest import FakeExecutor, fake_as_completed
+def test_fetch_historical_data_combines_sorts_and_formats_chunk_results(fetcher_factory, monkeypatch):
+    from conftest import FakeExecutor, FakeFuture, fake_as_completed
 
     fetcher = fetcher_factory()
     chunk_one = pd.DataFrame(
@@ -466,15 +494,12 @@ def test_fetch_historical_data_combines_sorts_and_formats_chunk_results(
         (date(2024, 1, 1), date(2024, 1, 2), "test_user", "minute", 111, {"Authorization": "enctoken auth-token"}),
         (date(2024, 1, 3), date(2024, 1, 4), "test_user", "minute", 111, {"Authorization": "enctoken auth-token"}),
     ]
-    chunk_results = [chunk_one, chunk_two]
+    queued_futures = [FakeFuture(result_value=chunk_one), FakeFuture(result_value=chunk_two)]
 
-    class ExecutorWithSequentialResults(FakeExecutor):
+    class ExecutorWithMappedFutures(FakeExecutor):
         def submit(self, fn, params):
             self.submitted_params.append(params)
-            return self.future_factory(fn, params)
-
-    def future_factory(fn, params):
-        return __import__("conftest").FakeFuture(result_value=chunk_results.pop(0))
+            return queued_futures.pop(0)
 
     monkeypatch.setattr(fetcher, "_resolve_ticker_token", lambda _ticker: 111)
     monkeypatch.setattr(fetcher, "_validate_date_range", lambda start, end: (start, end))
@@ -482,15 +507,7 @@ def test_fetch_historical_data_combines_sorts_and_formats_chunk_results(
     monkeypatch.setattr(fetcher.config, "get_user_id", lambda: "test_user")
     monkeypatch.setattr(fetcher, "_generate_date_ranges", lambda *args: date_ranges)
     monkeypatch.setattr(fetcher, "_fetch_data_chunk", lambda params: None)
-    monkeypatch.setattr(
-        data_fetcher_module,
-        "RateLimitedThreadPoolExecutor",
-        lambda max_workers, requests_per_second: ExecutorWithSequentialResults(
-            max_workers=max_workers,
-            requests_per_second=requests_per_second,
-            future_factory=future_factory,
-        ),
-    )
+    monkeypatch.setattr(data_fetcher_module, "RateLimitedThreadPoolExecutor", ExecutorWithMappedFutures)
     monkeypatch.setattr(data_fetcher_module, "as_completed", fake_as_completed)
 
     result = fetcher.fetch_historical_data("INFY", date(2024, 1, 1), date(2024, 1, 4))
@@ -501,9 +518,81 @@ def test_fetch_historical_data_combines_sorts_and_formats_chunk_results(
     assert "Timestamp" not in result.columns
 
 
-def test_fetch_historical_data_ignores_failed_chunk_and_returns_remaining_data(
+def test_fetch_historical_data_strict_mode_raises_if_any_chunk_fails(fetcher_factory, monkeypatch):
+    from conftest import FakeExecutor, FakeFuture, fake_as_completed
+
+    fetcher = fetcher_factory()
+    chunk_success = pd.DataFrame(
+        [
+            {
+                "Timestamp": "2024-01-01T09:15:00+0530",
+                "Open": 1,
+                "High": 2,
+                "Low": 0.5,
+                "Close": 1.5,
+                "Volume": 10,
+            }
+        ]
+    )
+    params_one = (date(2024, 1, 1), date(2024, 1, 2), "test_user", "minute", 111, {"Authorization": "enctoken auth-token"})
+    params_two = (date(2024, 1, 3), date(2024, 1, 4), "test_user", "minute", 111, {"Authorization": "enctoken auth-token"})
+    failing_future = FakeFuture(exception=RuntimeError("chunk failed"))
+    queued_futures = [FakeFuture(result_value=chunk_success), failing_future]
+
+    class ExecutorWithMappedFutures(FakeExecutor):
+        def submit(self, fn, params):
+            self.submitted_params.append(params)
+            return queued_futures.pop(0)
+
+    monkeypatch.setattr(fetcher, "_resolve_ticker_token", lambda _ticker: 111)
+    monkeypatch.setattr(fetcher, "_validate_date_range", lambda start, end: (start, end))
+    monkeypatch.setattr(fetcher.auth_manager, "get_auth_token", lambda: "auth-token")
+    monkeypatch.setattr(fetcher.config, "get_user_id", lambda: "test_user")
+    monkeypatch.setattr(fetcher, "_generate_date_ranges", lambda *args: [params_one, params_two])
+    monkeypatch.setattr(fetcher, "_fetch_data_chunk", lambda params: chunk_success)
+    monkeypatch.setattr(data_fetcher_module, "RateLimitedThreadPoolExecutor", ExecutorWithMappedFutures)
+    monkeypatch.setattr(data_fetcher_module, "as_completed", fake_as_completed)
+
+    with pytest.raises(DataFetchError, match="strict mode"):
+        fetcher.fetch_historical_data("INFY", date(2024, 1, 1), date(2024, 1, 4))
+
+    assert failing_future.cancel_called is False
+
+
+def test_fetch_historical_data_strict_mode_cancels_pending_futures(fetcher_factory, monkeypatch):
+    from conftest import FakeExecutor, FakeFuture
+
+    fetcher = fetcher_factory()
+    params_one = (date(2024, 1, 1), date(2024, 1, 2), "test_user", "minute", 111, {"Authorization": "enctoken auth-token"})
+    params_two = (date(2024, 1, 3), date(2024, 1, 4), "test_user", "minute", 111, {"Authorization": "enctoken auth-token"})
+    first_future = FakeFuture(exception=RuntimeError("chunk failed"))
+    second_future = FakeFuture(result_value=pd.DataFrame())
+    queued_futures = [first_future, second_future]
+
+    class ExecutorWithMappedFutures(FakeExecutor):
+        def submit(self, fn, params):
+            self.submitted_params.append(params)
+            return queued_futures.pop(0)
+
+    monkeypatch.setattr(fetcher, "_resolve_ticker_token", lambda _ticker: 111)
+    monkeypatch.setattr(fetcher, "_validate_date_range", lambda start, end: (start, end))
+    monkeypatch.setattr(fetcher.auth_manager, "get_auth_token", lambda: "auth-token")
+    monkeypatch.setattr(fetcher.config, "get_user_id", lambda: "test_user")
+    monkeypatch.setattr(fetcher, "_generate_date_ranges", lambda *args: [params_one, params_two])
+    monkeypatch.setattr(fetcher, "_fetch_data_chunk", lambda params: pd.DataFrame())
+    monkeypatch.setattr(data_fetcher_module, "RateLimitedThreadPoolExecutor", ExecutorWithMappedFutures)
+    monkeypatch.setattr(data_fetcher_module, "as_completed", lambda future_map: [first_future])
+
+    with pytest.raises(DataFetchError, match="cancelled 1 pending chunk"):
+        fetcher.fetch_historical_data("INFY", date(2024, 1, 1), date(2024, 1, 4))
+
+    assert second_future.cancel_called is True
+
+
+def test_fetch_historical_data_partial_mode_returns_partial_data_and_logs_one_warning(
     fetcher_factory,
     monkeypatch,
+    caplog,
 ):
     from conftest import FakeExecutor, FakeFuture, fake_as_completed
 
@@ -541,10 +630,99 @@ def test_fetch_historical_data_ignores_failed_chunk_and_returns_remaining_data(
     monkeypatch.setattr(data_fetcher_module, "RateLimitedThreadPoolExecutor", ExecutorWithMappedFutures)
     monkeypatch.setattr(data_fetcher_module, "as_completed", fake_as_completed)
 
-    result = fetcher.fetch_historical_data("INFY", date(2024, 1, 1), date(2024, 1, 4))
+    with caplog.at_level(logging.WARNING):
+        result = fetcher.fetch_historical_data(
+            "INFY",
+            date(2024, 1, 1),
+            date(2024, 1, 4),
+            chunk_failure_mode="partial",
+        )
+
+    warning_messages = [
+        record.getMessage()
+        for record in caplog.records
+        if "Historical fetch completed with partial data" in record.getMessage()
+    ]
 
     assert len(result) == 1
-    assert result.iloc[0]["Time"] == "09:15"
+    assert warning_messages == [
+        "Historical fetch completed with partial data: 1/2 chunks failed. Failed ranges: 2024-01-03 to 2024-01-04"
+    ]
+
+
+def test_fetch_historical_data_partial_mode_raises_if_all_chunks_fail(fetcher_factory, monkeypatch):
+    from conftest import FakeExecutor, FakeFuture, fake_as_completed
+
+    fetcher = fetcher_factory()
+    params_one = (date(2024, 1, 1), date(2024, 1, 2), "test_user", "minute", 111, {"Authorization": "enctoken auth-token"})
+    params_two = (date(2024, 1, 3), date(2024, 1, 4), "test_user", "minute", 111, {"Authorization": "enctoken auth-token"})
+    queued_futures = [
+        FakeFuture(exception=RuntimeError("chunk failed one")),
+        FakeFuture(exception=RuntimeError("chunk failed two")),
+    ]
+
+    class ExecutorWithMappedFutures(FakeExecutor):
+        def submit(self, fn, params):
+            self.submitted_params.append(params)
+            return queued_futures.pop(0)
+
+    monkeypatch.setattr(fetcher, "_resolve_ticker_token", lambda _ticker: 111)
+    monkeypatch.setattr(fetcher, "_validate_date_range", lambda start, end: (start, end))
+    monkeypatch.setattr(fetcher.auth_manager, "get_auth_token", lambda: "auth-token")
+    monkeypatch.setattr(fetcher.config, "get_user_id", lambda: "test_user")
+    monkeypatch.setattr(fetcher, "_generate_date_ranges", lambda *args: [params_one, params_two])
+    monkeypatch.setattr(fetcher, "_fetch_data_chunk", lambda params: pd.DataFrame())
+    monkeypatch.setattr(data_fetcher_module, "RateLimitedThreadPoolExecutor", ExecutorWithMappedFutures)
+    monkeypatch.setattr(data_fetcher_module, "as_completed", fake_as_completed)
+
+    with pytest.raises(DataFetchError, match="all 2 chunk\\(s\\) failed"):
+        fetcher.fetch_historical_data(
+            "INFY",
+            date(2024, 1, 1),
+            date(2024, 1, 4),
+            chunk_failure_mode="partial",
+        )
+
+
+def test_fetch_historical_data_per_call_override_wins_over_constructor_default(fetcher_factory, monkeypatch):
+    from conftest import FakeExecutor, FakeFuture, fake_as_completed
+
+    fetcher = fetcher_factory(chunk_failure_mode="partial")
+    params_one = (date(2024, 1, 1), date(2024, 1, 2), "test_user", "minute", 111, {"Authorization": "enctoken auth-token"})
+    params_two = (date(2024, 1, 3), date(2024, 1, 4), "test_user", "minute", 111, {"Authorization": "enctoken auth-token"})
+    queued_futures = [
+        FakeFuture(result_value=pd.DataFrame([{
+            "Timestamp": "2024-01-01T09:15:00+0530",
+            "Open": 1,
+            "High": 2,
+            "Low": 0.5,
+            "Close": 1.5,
+            "Volume": 10,
+        }])),
+        FakeFuture(exception=RuntimeError("chunk failed")),
+    ]
+
+    class ExecutorWithMappedFutures(FakeExecutor):
+        def submit(self, fn, params):
+            self.submitted_params.append(params)
+            return queued_futures.pop(0)
+
+    monkeypatch.setattr(fetcher, "_resolve_ticker_token", lambda _ticker: 111)
+    monkeypatch.setattr(fetcher, "_validate_date_range", lambda start, end: (start, end))
+    monkeypatch.setattr(fetcher.auth_manager, "get_auth_token", lambda: "auth-token")
+    monkeypatch.setattr(fetcher.config, "get_user_id", lambda: "test_user")
+    monkeypatch.setattr(fetcher, "_generate_date_ranges", lambda *args: [params_one, params_two])
+    monkeypatch.setattr(fetcher, "_fetch_data_chunk", lambda params: pd.DataFrame())
+    monkeypatch.setattr(data_fetcher_module, "RateLimitedThreadPoolExecutor", ExecutorWithMappedFutures)
+    monkeypatch.setattr(data_fetcher_module, "as_completed", fake_as_completed)
+
+    with pytest.raises(DataFetchError, match="strict mode"):
+        fetcher.fetch_historical_data(
+            "INFY",
+            date(2024, 1, 1),
+            date(2024, 1, 4),
+            chunk_failure_mode="strict",
+        )
 
 
 def test_fetch_historical_data_raises_invalid_ticker_error_unchanged(fetcher_factory, monkeypatch):

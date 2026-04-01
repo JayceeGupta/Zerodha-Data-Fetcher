@@ -40,22 +40,25 @@ try:
         "ZerodhaInstrumentManager",
         "AuthenticationManager",
         "Config",
-        
+
         # Backward compatibility functions
         "fetchDataZerodha",
         "fetchZerodhaID",
-        
+
+        # Instrument cache helpers
+        "refresh_instruments",
+
         # Utilities
         "setup_logging",
         "RateLimitedThreadPoolExecutor",
-        
+
         # Exceptions
         "ZerodhaAPIError",
-        "AuthenticationError", 
+        "AuthenticationError",
         "InvalidTickerError",
         "DataFetchError",
         "TokenExpiredError",
-        
+
         # Package metadata
         "__version__",
         "__author__",
@@ -84,6 +87,20 @@ except ImportError as e:
         "__url__",
         "check_installation"
     ]
+
+def refresh_instruments() -> bool:
+    """
+    Force-download the latest Zerodha instrument data, ignoring TTL.
+
+    This is a package-level convenience wrapper around
+    :pymeth:`ZerodhaInstrumentManager.refresh_instruments`.
+
+    Returns:
+        ``True`` if the download succeeded, ``False`` otherwise.
+    """
+    manager = ZerodhaInstrumentManager()
+    return manager.refresh_instruments()
+
 
 def check_installation():
     """
