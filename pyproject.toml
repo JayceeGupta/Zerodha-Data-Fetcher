@@ -7,8 +7,7 @@ name = "zerodha-data-fetcher"
 version = "1.0.3"
 description = "A Python package for fetching historical data from Zerodha API Using Account Credentials."
 readme = "README.md"
-license = "MIT"
-license-files = ["LICENSE"]
+license = {text = "MIT"}
 authors = [
     {name = "Jayam Gupta", email = "guptajayam47@gmail.com"}
 ]
