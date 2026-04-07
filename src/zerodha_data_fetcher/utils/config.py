@@ -1,5 +1,7 @@
 """Configuration management for Zerodha Data Fetcher."""
 
+from __future__ import annotations
+
 import logging
 import os
 from typing import Dict
