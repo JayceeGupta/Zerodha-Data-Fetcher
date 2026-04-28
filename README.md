@@ -4,8 +4,19 @@
 [![Python versions](https://img.shields.io/pypi/pyversions/zerodha-data-fetcher)](https://pypi.org/project/zerodha-data-fetcher/)
 [![Tests](https://github.com/JayceeGupta/Zerodha-Data-Fetcher/actions/workflows/test.yml/badge.svg)](https://github.com/JayceeGupta/Zerodha-Data-Fetcher/actions/workflows/test.yml)
 [![License](https://img.shields.io/github/license/JayceeGupta/Zerodha-Data-Fetcher)](LICENSE)
+[![Downloads](https://img.shields.io/pypi/dm/zerodha-data-fetcher)](https://pypi.org/project/zerodha-data-fetcher/)
 
 Python package for fetching historical market data from Zerodha's Kite web APIs with built-in authentication, rate limiting, instrument lookup, caching, and multi-account workflows.
+
+## Why Zerodha Data Fetcher?
+
+Zerodha's Kite platform provides powerful market data, but programmatic access to historical data requires navigating authentication flows, managing rate limits, and handling session tokens. This library handles all of that so you can focus on analysis:
+
+- **No official API key needed** -- authenticates through the Kite web interface using your existing account credentials
+- **Handles the full auth flow** -- password login, TOTP 2FA, encrypted token caching in your OS keyring
+- **Production-grade reliability** -- automatic retries, rate limiting, and configurable chunk failure modes
+- **Zero-config symbol resolution** -- pass a symbol name like `"RELIANCE"` instead of memorizing instrument tokens
+- **Parallel fetching** -- splits large date ranges into chunks and fetches them concurrently
 
 ## Table of Contents
 

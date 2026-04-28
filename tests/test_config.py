@@ -33,7 +33,9 @@ def test_validate_config_false_when_required_values_missing(clear_zerodha_env):
     assert config.validate_config() is False
 
 
-def test_validate_config_true_when_all_required_values_present(fake_config_kwargs, clear_zerodha_env):
+def test_validate_config_true_when_all_required_values_present(
+    fake_config_kwargs, clear_zerodha_env
+):
     config = Config(**fake_config_kwargs)
 
     assert config.validate_config() is True
@@ -55,7 +57,9 @@ def test_get_missing_config_reports_only_missing_keys(clear_zerodha_env):
     assert config.get_missing_config() == ["ZERODHA_TOTP_SECRET"]
 
 
-def test_to_dict_returns_expected_keys_and_values(fake_config_kwargs, clear_zerodha_env):
+def test_to_dict_returns_expected_keys_and_values(
+    fake_config_kwargs, clear_zerodha_env
+):
     config = Config(**fake_config_kwargs)
 
     assert config.to_dict() == {
@@ -73,7 +77,10 @@ def test_to_dict_returns_expected_keys_and_values(fake_config_kwargs, clear_zero
 
 
 def test_resolve_instrument_cache_ttl_uses_default_when_env_missing(clear_zerodha_env):
-    assert Config.resolve_instrument_cache_ttl_minutes() == Config.DEFAULT_INSTRUMENT_CACHE_TTL_MINUTES
+    assert (
+        Config.resolve_instrument_cache_ttl_minutes()
+        == Config.DEFAULT_INSTRUMENT_CACHE_TTL_MINUTES
+    )
 
 
 def test_resolve_instrument_cache_ttl_falls_back_on_invalid_env(monkeypatch, caplog):

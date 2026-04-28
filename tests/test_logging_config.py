@@ -14,7 +14,11 @@ def _get_handlers():
         and not isinstance(handler, logging.handlers.RotatingFileHandler)
     )
     file_handler = next(
-        (handler for handler in root.handlers if isinstance(handler, logging.handlers.RotatingFileHandler)),
+        (
+            handler
+            for handler in root.handlers
+            if isinstance(handler, logging.handlers.RotatingFileHandler)
+        ),
         None,
     )
     return console_handler, file_handler
@@ -54,7 +58,11 @@ def test_setup_logging_default_formats_split_console_and_file(tmp_path):
 
 
 def test_setup_logging_log_format_overrides_both_handlers(tmp_path):
-    setup_logging(log_level="INFO", log_file=str(tmp_path / "app.log"), log_format="%(levelname)s %(message)s")
+    setup_logging(
+        log_level="INFO",
+        log_file=str(tmp_path / "app.log"),
+        log_format="%(levelname)s %(message)s",
+    )
     console_handler, file_handler = _get_handlers()
     record = _make_record()
 
@@ -73,4 +81,7 @@ def test_setup_logging_console_and_file_formats_override_independently(tmp_path)
     record = _make_record()
 
     assert console_handler.format(record) == "CONSOLE Data fetch completed successfully"
-    assert file_handler.format(record) == "FILE fetch_historical_data:466 Data fetch completed successfully"
+    assert (
+        file_handler.format(record)
+        == "FILE fetch_historical_data:466 Data fetch completed successfully"
+    )

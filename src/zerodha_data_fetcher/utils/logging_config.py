@@ -5,8 +5,9 @@ import logging.handlers
 from pathlib import Path
 from typing import Optional
 
-
-DEFAULT_CONSOLE_FORMAT = "(%(asctime)s) - [%(levelname)s] - %(name)s %(funcName)s: %(message)s"
+DEFAULT_CONSOLE_FORMAT = (
+    "(%(asctime)s) - [%(levelname)s] - %(name)s %(funcName)s: %(message)s"
+)
 DEFAULT_FILE_FORMAT = (
     "%(asctime)s | %(levelname)s | %(name)s | %(funcName)s:%(lineno)d | "
     "%(threadName)s | %(message)s"
@@ -47,7 +48,9 @@ def setup_logging(
         resolved_console_format = console_format or DEFAULT_CONSOLE_FORMAT
         resolved_file_format = file_format or DEFAULT_FILE_FORMAT
 
-    console_formatter = logging.Formatter(resolved_console_format, datefmt=console_date_format)
+    console_formatter = logging.Formatter(
+        resolved_console_format, datefmt=console_date_format
+    )
     file_formatter = logging.Formatter(resolved_file_format, datefmt=file_date_format)
 
     root_logger = logging.getLogger()

@@ -18,7 +18,9 @@ def test_wait_for_slot_first_call_does_not_sleep(monkeypatch):
     limiter = RequestRateLimiter(2)
     sleep_calls = []
 
-    monkeypatch.setattr("zerodha_data_fetcher.core.rate_limiter.time.monotonic", lambda: 10.0)
+    monkeypatch.setattr(
+        "zerodha_data_fetcher.core.rate_limiter.time.monotonic", lambda: 10.0
+    )
     monkeypatch.setattr(
         "zerodha_data_fetcher.core.rate_limiter.time.sleep",
         lambda seconds: sleep_calls.append(seconds),
@@ -62,8 +64,12 @@ def test_rate_limited_executor_waits_before_each_submitted_task(monkeypatch):
 
     monkeypatch.setattr(RequestRateLimiter, "wait_for_slot", fake_wait)
 
-    with RateLimitedThreadPoolExecutor(max_workers=2, requests_per_second=4) as executor:
-        future_one = executor.submit(lambda value, suffix=None: f"{value}-{suffix}", "a", suffix="1")
+    with RateLimitedThreadPoolExecutor(
+        max_workers=2, requests_per_second=4
+    ) as executor:
+        future_one = executor.submit(
+            lambda value, suffix=None: f"{value}-{suffix}", "a", suffix="1"
+        )
         future_two = executor.submit(lambda value: value.upper(), "b")
 
         assert future_one.result() == "a-1"

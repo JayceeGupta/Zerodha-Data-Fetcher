@@ -7,7 +7,6 @@ from typing import Any, Callable, Dict, Iterable, Optional
 import pandas as pd
 import pytest
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = PROJECT_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
@@ -104,7 +103,9 @@ def clear_zerodha_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 class FakeFuture:
-    def __init__(self, result_value: Any = None, exception: Optional[BaseException] = None):
+    def __init__(
+        self, result_value: Any = None, exception: Optional[BaseException] = None
+    ):
         self._result_value = result_value
         self._exception = exception
         self.cancel_called = False
@@ -148,12 +149,16 @@ class FakeExecutor:
         self.shutdown_called = True
 
 
-def fake_as_completed(future_to_params: Dict[FakeFuture, tuple]) -> Iterable[FakeFuture]:
+def fake_as_completed(
+    future_to_params: Dict[FakeFuture, tuple],
+) -> Iterable[FakeFuture]:
     return list(future_to_params.keys())
 
 
 @pytest.fixture
-def fetcher_factory(monkeypatch: pytest.MonkeyPatch, fake_config_kwargs: Dict[str, str]):
+def fetcher_factory(
+    monkeypatch: pytest.MonkeyPatch, fake_config_kwargs: Dict[str, str]
+):
     from zerodha_data_fetcher.core import data_fetcher as data_fetcher_module
 
     class FakeAuthManager:

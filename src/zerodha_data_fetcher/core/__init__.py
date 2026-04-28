@@ -3,7 +3,7 @@ Core modules for Zerodha Data Fetcher.
 
 This module contains the main functionality:
 - Data fetching and processing
-- Authentication management  
+- Authentication management
 - Rate limiting
 - Instrument management
 """
@@ -15,7 +15,7 @@ from .rate_limiter import RateLimitedThreadPoolExecutor
 
 __all__ = [
     "ZerodhaDataFetcher",
-    "fetchDataZerodha", 
+    "fetchDataZerodha",
     "ZerodhaInstrumentManager",
     "fetchZerodhaID",
     "AuthenticationManager",

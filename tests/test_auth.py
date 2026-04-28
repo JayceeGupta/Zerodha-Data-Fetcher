@@ -55,7 +55,9 @@ def auth_manager_factory(monkeypatch, fake_config_kwargs):
     return factory
 
 
-def test_get_auth_token_uses_user_scoped_cache(auth_manager_factory, memory_keyring, monkeypatch):
+def test_get_auth_token_uses_user_scoped_cache(
+    auth_manager_factory, memory_keyring, monkeypatch
+):
     manager = auth_manager_factory(user_id="user_one")
 
     class FakeDate(date):
@@ -74,7 +76,9 @@ def test_get_auth_token_uses_user_scoped_cache(auth_manager_factory, memory_keyr
     assert manager.get_auth_token() == "cached-token"
 
 
-def test_get_auth_token_does_not_reuse_other_users_scoped_cache(auth_manager_factory, memory_keyring):
+def test_get_auth_token_does_not_reuse_other_users_scoped_cache(
+    auth_manager_factory, memory_keyring
+):
     manager = auth_manager_factory(user_id="user_two")
     today = date.today().strftime("%Y-%m-%d")
 
@@ -86,7 +90,9 @@ def test_get_auth_token_does_not_reuse_other_users_scoped_cache(auth_manager_fac
     assert manager.get_auth_token() == "fresh-token"
 
 
-def test_get_auth_token_migrates_matching_legacy_entries(auth_manager_factory, memory_keyring, monkeypatch):
+def test_get_auth_token_migrates_matching_legacy_entries(
+    auth_manager_factory, memory_keyring, monkeypatch
+):
     manager = auth_manager_factory(user_id="legacy_user")
 
     class FakeDate(date):
@@ -104,11 +110,15 @@ def test_get_auth_token_migrates_matching_legacy_entries(auth_manager_factory, m
     monkeypatch.setattr(auth_module.time, "time", lambda: 101)
 
     assert manager.get_auth_token() == "legacy-token"
-    assert memory_keyring[(manager.token_key, "token:legacy_user")] == "enc:legacy-token"
+    assert (
+        memory_keyring[(manager.token_key, "token:legacy_user")] == "enc:legacy-token"
+    )
     assert (manager.token_key, "token") not in memory_keyring
 
 
-def test_invalidate_token_deletes_current_user_and_legacy_entries(auth_manager_factory, memory_keyring):
+def test_invalidate_token_deletes_current_user_and_legacy_entries(
+    auth_manager_factory, memory_keyring
+):
     manager = auth_manager_factory(user_id="cleanup_user")
 
     memory_keyring[(manager.token_key, "token:cleanup_user")] = "enc:token"
@@ -124,7 +134,9 @@ def test_invalidate_token_deletes_current_user_and_legacy_entries(auth_manager_f
     assert memory_keyring == {}
 
 
-def test_generate_auth_token_does_not_log_sensitive_values(monkeypatch, fake_config_kwargs, caplog):
+def test_generate_auth_token_does_not_log_sensitive_values(
+    monkeypatch, fake_config_kwargs, caplog
+):
     class ConfigStub:
         def __init__(self):
             self.ZERODHA_USER_ID = fake_config_kwargs["user_id"]
@@ -161,7 +173,9 @@ def test_generate_auth_token_does_not_log_sensitive_values(monkeypatch, fake_con
             return ResponseStub(content=b'{"status":"ok"}')
 
     generator = ZerodhaTokenGenerator(config=ConfigStub())
-    monkeypatch.setattr("zerodha_data_fetcher.core.token_generator.Session", FakeSession)
+    monkeypatch.setattr(
+        "zerodha_data_fetcher.core.token_generator.Session", FakeSession
+    )
     monkeypatch.setattr(generator, "get_totp", lambda _secret="": "654321")
 
     with caplog.at_level(logging.DEBUG):

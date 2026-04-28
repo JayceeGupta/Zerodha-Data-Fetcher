@@ -28,9 +28,6 @@ commands.txt
 # Example files
 basic_usage.py
 
-# Tooling lockfiles
-uv.lock
-
 # Local planning / scratch docs
 risk-mitigation-plan*.md
 plan-*.md

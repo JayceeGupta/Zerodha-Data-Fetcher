@@ -26,6 +26,7 @@ _DOWNLOAD_TIMEOUT = 60  # seconds
 # Path helpers
 # ---------------------------------------------------------------------------
 
+
 def get_package_data_path(filename: str) -> Path:
     """
     Get path to a data file bundled inside the package.
@@ -59,6 +60,7 @@ def get_cache_path(filename: str = _INSTRUMENT_FILENAME) -> Path:
 # Cache age
 # ---------------------------------------------------------------------------
 
+
 def get_cache_age_minutes(path: Path) -> float:
     """
     Return the age of *path* in minutes.
@@ -74,6 +76,7 @@ def get_cache_age_minutes(path: Path) -> float:
 # ---------------------------------------------------------------------------
 # Downloading
 # ---------------------------------------------------------------------------
+
 
 def download_instruments(dest: Path) -> bool:
     """
@@ -102,6 +105,7 @@ def download_instruments(dest: Path) -> bool:
 # ---------------------------------------------------------------------------
 # Main loader
 # ---------------------------------------------------------------------------
+
 
 def load_instrument_data(
     filename: Optional[str] = None,
@@ -144,7 +148,9 @@ def load_instrument_data(
     if age < cache_ttl_minutes:
         logger.debug(
             "Using cached instrument data (%s, age %.0f min, TTL %d min)",
-            cache_file, age, cache_ttl_minutes,
+            cache_file,
+            age,
+            cache_ttl_minutes,
         )
         try:
             return pd.read_csv(cache_file)
@@ -156,13 +162,16 @@ def load_instrument_data(
         try:
             return pd.read_csv(cache_file)
         except Exception as exc:
-            logger.warning("Downloaded file unreadable (%s), falling back to bundled.", exc)
+            logger.warning(
+                "Downloaded file unreadable (%s), falling back to bundled.", exc
+            )
 
     # Last resort: bundled CSV inside the package
     bundled = get_package_data_path(filename)
     if bundled.exists():
         logger.warning(
-            "Using bundled instrument data as fallback (%s)", bundled,
+            "Using bundled instrument data as fallback (%s)",
+            bundled,
         )
         return pd.read_csv(bundled)
 

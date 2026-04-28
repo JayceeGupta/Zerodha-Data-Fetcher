@@ -8,10 +8,12 @@ This package provides tools for:
 - Parallel data fetching with error handling
 """
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 __author__ = "Jayam Gupta"
 __email__ = "guptajayam47@gmail.com"
-__description__ = "A Python package for fetching historical data from Zerodha API for free"
+__description__ = (
+    "A Python package for fetching historical data from Zerodha API for free"
+)
 __url__ = "https://github.com/JayceeGupta/Zerodha-Data-Fetcher"
 
 # Import main classes and functions for easy access
@@ -21,7 +23,7 @@ try:
     from .core.instrument_manager import ZerodhaInstrumentManager, fetchZerodhaID
     from .core.auth import AuthenticationManager
     from .core.rate_limiter import RateLimitedThreadPoolExecutor
-    
+
     # Utilities
     from .utils.config import Config
     from .utils.logging_config import setup_logging
@@ -30,9 +32,9 @@ try:
         AuthenticationError,
         InvalidTickerError,
         DataFetchError,
-        TokenExpiredError
+        TokenExpiredError,
     )
-    
+
     # Public API - what users can import
     __all__ = [
         # Main classes
@@ -40,25 +42,20 @@ try:
         "ZerodhaInstrumentManager",
         "AuthenticationManager",
         "Config",
-
         # Backward compatibility functions
         "fetchDataZerodha",
         "fetchZerodhaID",
-
         # Instrument cache helpers
         "refresh_instruments",
-
         # Utilities
         "setup_logging",
         "RateLimitedThreadPoolExecutor",
-
         # Exceptions
         "ZerodhaAPIError",
         "AuthenticationError",
         "InvalidTickerError",
         "DataFetchError",
         "TokenExpiredError",
-
         # Package metadata
         "__version__",
         "__author__",
@@ -66,27 +63,29 @@ try:
         "__description__",
         "__url__",
     ]
-    
+
     # Package is fully functional
     _IMPORT_ERROR = None
-    
+
 except ImportError as e:
     # Handle import errors gracefully during development or missing dependencies
     import warnings
+
     warnings.warn(
         f"Some imports failed: {e}. "
         f"Please ensure all dependencies are installed: pip install zerodha-data-fetcher"
     )
-    
+
     _IMPORT_ERROR = e
     __all__ = [
-        "__version__", 
-        "__author__", 
-        "__email__", 
-        "__description__", 
+        "__version__",
+        "__author__",
+        "__email__",
+        "__description__",
         "__url__",
-        "check_installation"
+        "check_installation",
     ]
+
 
 def refresh_instruments() -> bool:
     """
@@ -105,14 +104,16 @@ def refresh_instruments() -> bool:
 def check_installation():
     """
     Check if package is properly installed with all dependencies.
-    
+
     Returns:
         bool: True if package is fully functional, False otherwise
     """
     if _IMPORT_ERROR:
         print(f"❌ Package installation incomplete: {_IMPORT_ERROR}")
         print("💡 Try: pip install zerodha-data-fetcher")
-        print("💡 Or install with all dependencies: pip install 'zerodha-data-fetcher[dev]'")
+        print(
+            "💡 Or install with all dependencies: pip install 'zerodha-data-fetcher[dev]'"
+        )
         return False
     else:
         print("✅ Package is properly installed and ready to use!")
@@ -120,9 +121,11 @@ def check_installation():
         print(f"🔗 Documentation: {__url__}")
         return True
 
+
 def get_version():
     """Get package version."""
     return __version__
+
 
 def get_info():
     """Get package information."""
@@ -133,8 +136,9 @@ def get_info():
         "email": __email__,
         "description": __description__,
         "url": __url__,
-        "functional": _IMPORT_ERROR is None
+        "functional": _IMPORT_ERROR is None,
     }
+
 
 # Quick usage example in docstring
 __doc__ = """

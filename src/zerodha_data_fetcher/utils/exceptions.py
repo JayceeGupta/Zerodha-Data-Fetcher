@@ -23,6 +23,7 @@ class ZerodhaAPIError(Exception):
     catching a more specific subclass when you need to distinguish
     between authentication, ticker, rate-limit, or data-fetch failures.
     """
+
     pass
 
 
@@ -32,6 +33,7 @@ class AuthenticationError(ZerodhaAPIError):
     Common causes: invalid credentials, failed TOTP generation, or an
     HTTP error during the login / 2FA handshake.
     """
+
     pass
 
 
@@ -41,6 +43,7 @@ class InvalidTickerError(ZerodhaAPIError):
     This can happen when an integer token does not map to any instrument
     or a symbol string is not found in the instrument data.
     """
+
     pass
 
 
@@ -51,6 +54,7 @@ class RateLimitError(ZerodhaAPIError):
     :class:`~zerodha_data_fetcher.core.rate_limiter.RequestRateLimiter`,
     but the server may still reject requests under heavy load.
     """
+
     pass
 
 
@@ -61,6 +65,7 @@ class DataFetchError(ZerodhaAPIError):
     structures, and JSON parsing failures encountered while retrieving
     OHLCV candle data from the Kite API.
     """
+
     pass
 
 
@@ -72,4 +77,5 @@ class TokenExpiredError(AuthenticationError):
     generating a fresh token, so callers rarely need to catch it
     directly.
     """
+
     pass

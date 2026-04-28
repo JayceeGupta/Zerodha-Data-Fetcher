@@ -91,10 +91,14 @@ class ZerodhaDataFetcher:
             "keyring_encryption_key": keyring_encryption_key,
             **kwargs,
         }
-        config_params = {key: value for key, value in config_params.items() if value is not None}
+        config_params = {
+            key: value for key, value in config_params.items() if value is not None
+        }
 
         self.config = Config(**config_params)
-        self.auth_manager = AuthenticationManager(token_expiry_hours, config=self.config)
+        self.auth_manager = AuthenticationManager(
+            token_expiry_hours, config=self.config
+        )
         self.instrument_manager = instrument_manager or ZerodhaInstrumentManager(
             cache_ttl_minutes=cache_ttl_minutes,
         )
@@ -127,9 +131,13 @@ class ZerodhaDataFetcher:
         """Format a date range label from chunk parameters."""
         return self._format_date_range_label(params[0], params[1])
 
-    def _summarize_failed_ranges(self, failed_chunks: List[Tuple[Tuple, Exception]]) -> str:
+    def _summarize_failed_ranges(
+        self, failed_chunks: List[Tuple[Tuple, Exception]]
+    ) -> str:
         """Return a compact range summary for failed chunk parameters."""
-        return ", ".join(self._format_params_range_label(params) for params, _ in failed_chunks)
+        return ", ".join(
+            self._format_params_range_label(params) for params, _ in failed_chunks
+        )
 
     def _extract_error_payload(self, error_message: str) -> Optional[Dict[str, Any]]:
         """Attempt to extract a Zerodha JSON error payload from an exception message."""
@@ -141,7 +149,9 @@ class ZerodhaDataFetcher:
         except (json.JSONDecodeError, IndexError):
             return None
 
-    def _cancel_pending_futures(self, future_to_params: Dict[Any, Tuple], exclude_future: Any) -> int:
+    def _cancel_pending_futures(
+        self, future_to_params: Dict[Any, Tuple], exclude_future: Any
+    ) -> int:
         """Best-effort cancellation for futures that have not started yet."""
         cancelled = 0
         for future in future_to_params:
@@ -158,8 +168,8 @@ class ZerodhaDataFetcher:
         logger.debug("Combined DataFrame shape: %s", final_df.shape)
 
         # Zerodha returns timestamps as "YYYY-MM-DD HH:MM:SS+ZZZZ"
-        final_df["Time"] = final_df["Timestamp"].str[11:16]   # Extract "HH:MM"
-        final_df["Date"] = final_df["Timestamp"].str[:10]      # Extract "YYYY-MM-DD"
+        final_df["Time"] = final_df["Timestamp"].str[11:16]  # Extract "HH:MM"
+        final_df["Date"] = final_df["Timestamp"].str[:10]  # Extract "YYYY-MM-DD"
         final_df.sort_values("Timestamp", inplace=True, ignore_index=True)
         final_df.drop(["Timestamp"], axis=1, inplace=True)
 
@@ -215,7 +225,9 @@ class ZerodhaDataFetcher:
                         )
                         return False
 
-                logger.debug("Ticker validation failed for %s: %s", ticker_token, error_message)
+                logger.debug(
+                    "Ticker validation failed for %s: %s", ticker_token, error_message
+                )
                 return False
 
         return False
@@ -256,7 +268,9 @@ class ZerodhaDataFetcher:
             if instrument_token is None:
                 raise InvalidTickerError(f"Symbol not found: {ticker_token}")
 
-            logger.debug("Resolved %s to instrument token: %s", ticker_token, instrument_token)
+            logger.debug(
+                "Resolved %s to instrument token: %s", ticker_token, instrument_token
+            )
             return instrument_token
 
         raise InvalidTickerError(f"Invalid ticker token type: {type(ticker_token)}")
@@ -325,7 +339,9 @@ class ZerodhaDataFetcher:
 
             candles = response_data["data"]["candles"]
             if not candles:
-                logger.warning("No data found for period: %s to %s", current_date, next_date)
+                logger.warning(
+                    "No data found for period: %s to %s", current_date, next_date
+                )
                 return pd.DataFrame()
 
             columns = ["Timestamp", "Open", "High", "Low", "Close", "Volume", "OI"]
@@ -360,7 +376,9 @@ class ZerodhaDataFetcher:
             logger.error("Unexpected error in data chunk fetch: %s", str(exc))
             raise DataFetchError(f"Data fetch failed: {str(exc)}")
 
-    def _validate_date_range(self, start_date: date, end_date: date) -> Tuple[date, date]:
+    def _validate_date_range(
+        self, start_date: date, end_date: date
+    ) -> Tuple[date, date]:
         """
         Validate and adjust date range parameters.
 
@@ -377,11 +395,15 @@ class ZerodhaDataFetcher:
 
         ten_years_ago = date.today() - relativedelta(years=Config.MAX_HISTORICAL_YEARS)
         if start_date < ten_years_ago:
-            logger.warning("Start date %s is too old, setting to %s", start_date, ten_years_ago)
+            logger.warning(
+                "Start date %s is too old, setting to %s", start_date, ten_years_ago
+            )
             start_date = ten_years_ago
 
         if start_date > end_date:
-            logger.warning("Start date %s > end date %s, swapping", start_date, end_date)
+            logger.warning(
+                "Start date %s > end date %s, swapping", start_date, end_date
+            )
             start_date, end_date = end_date, start_date
 
         return start_date, end_date
@@ -415,7 +437,9 @@ class ZerodhaDataFetcher:
 
         while current_date < end_date:
             next_date = min(current_date + interval, end_date)
-            date_ranges.append((current_date, next_date, userid, timeframe, token, headers))
+            date_ranges.append(
+                (current_date, next_date, userid, timeframe, token, headers)
+            )
             current_date = next_date + timedelta(days=1)
 
         logger.debug("Generated %s date ranges for processing", len(date_ranges))
@@ -473,7 +497,9 @@ class ZerodhaDataFetcher:
             headers = {"Authorization": f"enctoken {auth_token}"}
             userid = self.config.get_user_id()
 
-            logger.debug("Using resolved token: %s, User ID: %s", resolved_token, userid)
+            logger.debug(
+                "Using resolved token: %s, User ID: %s", resolved_token, userid
+            )
 
             date_ranges = self._generate_date_ranges(
                 start_date,
@@ -522,15 +548,21 @@ class ZerodhaDataFetcher:
                         continue
 
                     if df.empty:
-                        logger.warning("Empty data for range: %s to %s", current_date, next_date)
+                        logger.warning(
+                            "Empty data for range: %s to %s", current_date, next_date
+                        )
                         empty_chunks += 1
                         continue
 
                     all_data.append(df)
-                    logger.debug("Processed chunk successfully, total chunks: %s", len(all_data))
+                    logger.debug(
+                        "Processed chunk successfully, total chunks: %s", len(all_data)
+                    )
 
             if empty_chunks > 0:
-                logger.warning("Found %s/%s empty data ranges", empty_chunks, len(date_ranges))
+                logger.warning(
+                    "Found %s/%s empty data ranges", empty_chunks, len(date_ranges)
+                )
 
             if failed_chunks:
                 if effective_chunk_failure_mode == "strict":
@@ -541,7 +573,9 @@ class ZerodhaDataFetcher:
                         f"{self._format_params_range_label(first_failed_params)}: {first_error}"
                     )
                     if cancelled_pending_chunks:
-                        summary += f"; cancelled {cancelled_pending_chunks} pending chunk(s)"
+                        summary += (
+                            f"; cancelled {cancelled_pending_chunks} pending chunk(s)"
+                        )
                     raise DataFetchError(summary)
 
                 if all_data:
@@ -572,7 +606,9 @@ class ZerodhaDataFetcher:
             logger.info("Processing %s data chunks", len(all_data))
             final_df = self._prepare_final_dataframe(all_data)
 
-            logger.info("Data fetch completed successfully. Final shape: %s", final_df.shape)
+            logger.info(
+                "Data fetch completed successfully. Final shape: %s", final_df.shape
+            )
             logger.info(
                 "Date range in data: %s to %s",
                 final_df["Date"].min(),
@@ -661,6 +697,7 @@ def fetchDataZerodha(
         pd.DataFrame: Historical data.
     """
     import warnings
+
     warnings.warn(
         "fetchDataZerodha() is deprecated. "
         "Use ZerodhaDataFetcher().fetch_historical_data() instead.",

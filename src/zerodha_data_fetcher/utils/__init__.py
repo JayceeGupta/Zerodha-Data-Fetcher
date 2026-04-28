@@ -14,9 +14,9 @@ from .logging_config import setup_logging
 from .exceptions import (
     ZerodhaAPIError,
     AuthenticationError,
-    InvalidTickerError, 
+    InvalidTickerError,
     DataFetchError,
-    TokenExpiredError
+    TokenExpiredError,
 )
 from .helpers import execution_timer, retry_on_failure
 
@@ -25,17 +25,18 @@ from .helpers import execution_timer, retry_on_failure
 # even if those optional dependencies are missing at import time.
 try:
     from .data_loader import load_instrument_data, get_package_data_path
+
     _DATA_LOADER_AVAILABLE = True
 except ImportError:
     _DATA_LOADER_AVAILABLE = False
 
 __all__ = [
     "Config",
-    "setup_logging", 
+    "setup_logging",
     "ZerodhaAPIError",
     "AuthenticationError",
     "InvalidTickerError",
-    "DataFetchError", 
+    "DataFetchError",
     "TokenExpiredError",
     "execution_timer",
     "retry_on_failure",
@@ -43,8 +44,4 @@ __all__ = [
 
 # Add data loader functions if available
 if _DATA_LOADER_AVAILABLE:
-    __all__.extend([
-        "load_instrument_data",
-        "get_package_data_path"
-    ])
-
+    __all__.extend(["load_instrument_data", "get_package_data_path"])

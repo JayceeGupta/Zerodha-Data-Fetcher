@@ -21,7 +21,9 @@ def test_get_instrument_token_returns_stock_token(monkeypatch, sample_instrument
     assert manager.get_instrument_token("INFY") == 101
 
 
-def test_get_instrument_token_prefers_explicit_exchange(monkeypatch, sample_instrument_df):
+def test_get_instrument_token_prefers_explicit_exchange(
+    monkeypatch, sample_instrument_df
+):
     monkeypatch.setattr(
         "zerodha_data_fetcher.core.instrument_manager.load_instrument_data",
         lambda **kwargs: sample_instrument_df.rename(
@@ -38,7 +40,9 @@ def test_get_instrument_token_prefers_explicit_exchange(monkeypatch, sample_inst
     assert manager.get_instrument_token("INFY", exchange="BSE") == 202
 
 
-def test_get_instrument_token_returns_none_for_unknown_symbol(monkeypatch, sample_instrument_df):
+def test_get_instrument_token_returns_none_for_unknown_symbol(
+    monkeypatch, sample_instrument_df
+):
     monkeypatch.setattr(
         "zerodha_data_fetcher.core.instrument_manager.load_instrument_data",
         lambda **kwargs: sample_instrument_df.rename(
@@ -144,7 +148,9 @@ def test_validate_symbol_false_for_missing_symbol(monkeypatch, sample_instrument
     assert manager.validate_symbol("MISSING") is False
 
 
-def test_fetch_instrument_ids_for_equity_uses_loaded_symbols(monkeypatch, sample_instrument_df):
+def test_fetch_instrument_ids_for_equity_uses_loaded_symbols(
+    monkeypatch, sample_instrument_df
+):
     monkeypatch.setattr(
         "zerodha_data_fetcher.core.instrument_manager.load_instrument_data",
         lambda **kwargs: sample_instrument_df.rename(
@@ -157,7 +163,9 @@ def test_fetch_instrument_ids_for_equity_uses_loaded_symbols(monkeypatch, sample
         ),
     )
     manager = ZerodhaInstrumentManager()
-    monkeypatch.setattr(manager, "_load_equity_stocks", lambda: ["INFY", "RELIANCE", "MISSING"])
+    monkeypatch.setattr(
+        manager, "_load_equity_stocks", lambda: ["INFY", "RELIANCE", "MISSING"]
+    )
 
     results = manager.fetch_instrument_ids(is_stock=True)
 
@@ -170,7 +178,9 @@ def test_normalize_commodity_symbol_basic_case():
     assert manager._normalize_commodity_symbol("GOLD petal") == "GOLD petal"
 
 
-def test_instrument_manager_uses_shared_ttl_resolution(monkeypatch, sample_instrument_df):
+def test_instrument_manager_uses_shared_ttl_resolution(
+    monkeypatch, sample_instrument_df
+):
     captured = {}
 
     monkeypatch.setattr(
@@ -207,7 +217,9 @@ def test_data_loader_uses_shared_ttl_resolution(monkeypatch, tmp_path):
         "resolve_instrument_cache_ttl_minutes",
         classmethod(lambda cls, env_value=None: 33),
     )
-    monkeypatch.setattr(data_loader_module, "get_cache_path", lambda filename: tmp_path / filename)
+    monkeypatch.setattr(
+        data_loader_module, "get_cache_path", lambda filename: tmp_path / filename
+    )
     monkeypatch.setattr(data_loader_module, "get_cache_age_minutes", lambda path: 0)
 
     expected = pd.DataFrame([{"instrument_token": 1}])
