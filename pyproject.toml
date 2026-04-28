@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "zerodha-data-fetcher"
-version = "1.0.3"
+version = "1.1.0"
 description = "A Python package for fetching historical data from Zerodha API Using Account Credentials."
 readme = "README.md"
 license = {text = "MIT"}

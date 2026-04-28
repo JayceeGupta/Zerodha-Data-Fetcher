@@ -8,7 +8,7 @@ This package provides tools for:
 - Parallel data fetching with error handling
 """
 
-__version__ = "1.0.3"
+__version__ = "1.1.0"
 __author__ = "Jayam Gupta"
 __email__ = "guptajayam47@gmail.com"
 __description__ = "A Python package for fetching historical data from Zerodha API for free"

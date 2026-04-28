@@ -1,17 +1,53 @@
 # Zerodha Data Fetcher
 
-A Python package for fetching historical data from Zerodha API with advanced features like rate limiting, authentication management, parallel data fetching, and multi-account support for massive data retrieval.
+[![PyPI version](https://img.shields.io/pypi/v/zerodha-data-fetcher)](https://pypi.org/project/zerodha-data-fetcher/)
+[![Python versions](https://img.shields.io/pypi/pyversions/zerodha-data-fetcher)](https://pypi.org/project/zerodha-data-fetcher/)
+[![Tests](https://github.com/JayceeGupta/Zerodha-Data-Fetcher/actions/workflows/test.yml/badge.svg)](https://github.com/JayceeGupta/Zerodha-Data-Fetcher/actions/workflows/test.yml)
+[![License](https://img.shields.io/github/license/JayceeGupta/Zerodha-Data-Fetcher)](LICENSE)
+
+Python package for fetching historical market data from Zerodha's Kite web APIs with built-in authentication, rate limiting, instrument lookup, caching, and multi-account workflows.
+
+## Table of Contents
+
+- [Features](#features)
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [TOTP Setup](#totp-setup)
+- [Configuration](#configuration)
+- [Runtime Configuration Override](#runtime-configuration-override)
+- [Historical Fetch Failure Modes](#historical-fetch-failure-modes)
+- [Logging](#logging)
+- [Multi-Account Parallel Processing](#multi-account-parallel-processing)
+- [Instrument Data Caching](#instrument-data-caching)
+- [API Reference](#api-reference)
+- [Error Handling](#error-handling)
+- [Development](#development)
+- [Contributing](#contributing)
+- [Security](#security)
+- [License](#license)
+- [Disclaimer](#disclaimer)
+- [Support](#support)
 
 ## Features
 
-- 🚀 **Fast Parallel Data Fetching**: Concurrent requests with intelligent rate limiting
-- 🔐 **Automatic Authentication**: Handles login, 2FA, and token management
-- 📊 **Multiple Data Formats**: Support for minute, daily, and other timeframes
-- 🛡️ **Error Handling**: Robust error handling with retry mechanisms
-- 🔍 **Symbol Search**: Built-in instrument search and validation
-- ⚙️ **Configurable**: Flexible configuration via environment variables or parameters
-- 🏭 **Multi-Account Support**: Create multiple instances for massive parallel data retrieval
-- 🔧 **Runtime Configuration Override**: Override environment variables at runtime
+- Fast parallel historical data fetching with request pacing
+- Automatic authentication flow with password, TOTP, and token handling
+- Support for instrument tokens and symbol-based lookups
+- Strict-by-default chunk failure handling for correctness-sensitive workloads
+- Runtime overrides for environment-based configuration
+- Instrument metadata search and caching
+- Multi-account patterns for high-volume retrieval
+- Structured logging with separate console and file formats
+
+## Prerequisites
+
+Before using the package, make sure you have:
+
+- Python 3.8 or newer
+- A Zerodha account with Kite access
+- TOTP enabled on that account
+- `pip` or `uv` available in your environment
 
 ## Installation
 
@@ -19,13 +55,21 @@ A Python package for fetching historical data from Zerodha API with advanced fea
 pip install zerodha-data-fetcher
 ```
 
+For development:
+
+```bash
+uv sync --all-extras
+```
+
 ## Quick Start
 
-### 1. Set up TOTP (Time-based OTP)
+### TOTP Setup
 
-First, you need to set up TOTP for your Zerodha account. Follow this tutorial: [Zerodha TOTP Setup Guide](https://support.zerodha.com/category/trading-and-markets/general-kite/login-credentials-of-trading-platforms/articles/time-based-otp-setup)
+Set up TOTP for your Zerodha account before using the package:
 
-### 2. Set up environment variables
+[Zerodha TOTP Setup Guide](https://support.zerodha.com/category/trading-and-markets/general-kite/login-credentials-of-trading-platforms/articles/time-based-otp-setup)
+
+### Environment Variables
 
 Create a `.env` file in your project root:
 
@@ -43,83 +87,109 @@ ZERODHA_2FA_URL=https://kite.zerodha.com/api/twofa
 ZERODHA_HISTORICAL_URL=https://kite.zerodha.com/oms/instruments/historical/{token}/{timeframe}?user_id={userid}&oi=1&from={current_date}&to={next_date}
 ZERODHA_KEYRING_TOKEN_KEY=zerodha_auth_token
 ZERODHA_KEYRING_ENCRYPTION_KEY=zerodha_encryption_key
+ZERODHA_INSTRUMENT_CACHE_TTL=1440
 ```
 
-### 3. Basic Usage
+### Basic Usage
 
 ```python
-from zerodha_data_fetcher import ZerodhaDataFetcher, setup_logging
 from datetime import date, timedelta
 
-# Setup logging (optional)
+from zerodha_data_fetcher import ZerodhaDataFetcher, setup_logging
+
 setup_logging(log_level="INFO", log_file="logs/zerodha_fetcher.log")
 
-# Initialize the fetcher
 fetcher = ZerodhaDataFetcher(
     requests_per_second=3,
-    chunk_failure_mode="strict",  # default
+    chunk_failure_mode="strict",
 )
 
-# Define date range
 end_date = date.today()
 start_date = end_date - timedelta(days=30)
 
-# Example 1: Fetch data using instrument token
 data = fetcher.fetch_historical_data(
-    ticker_token=408065,  # HDFC Bank instrument token
+    ticker_token=408065,
     start_date=start_date,
     end_date=end_date,
-    timeframe="minute"
+    timeframe="minute",
 )
 
 print(f"Retrieved {len(data)} records")
 print(data.head())
 
-# Example 2: Fetch data using symbol name
-data = fetcher.fetch_historical_data(
+reliance_data = fetcher.fetch_historical_data(
     ticker_token="RELIANCE",
     start_date=start_date,
     end_date=end_date,
-    timeframe="minute"
+    timeframe="minute",
 )
 
-print(f"Retrieved {len(data)} records for RELIANCE")
-print(data.head())
+print(f"Retrieved {len(reliance_data)} records for RELIANCE")
+print(reliance_data.head())
 
-# Example 3: Search for symbols
 search_results = fetcher.search_symbols("TATA", limit=5)
-print("Found symbols:", search_results[['Instrument_Token', 'Name', 'Exchange']])
+print(search_results[["Instrument_Token", "Name", "Exchange"]])
 
-# Example 4: Get instrument information
 instrument_info = fetcher.get_instrument_info("INFY")
-print("Instrument info:", instrument_info)
+print(instrument_info)
 ```
 
-Authentication logs are sanitized by default. TOTP values, raw auth response bodies,
-headers, cookies, and encrypted token material are never written to the logs.
+Authentication logs are sanitized by default. TOTP values, raw auth response bodies, headers, cookies, and encrypted token material are never written to the logs.
 
-### 4. Runtime Configuration Override
+## Configuration
+
+### Environment Variables
+
+| Variable | Description | Required | Default |
+| -------- | ----------- | -------- | ------- |
+| `ZERODHA_USER_ID` | Zerodha user ID | Yes | - |
+| `ZERODHA_PASSWORD` | Zerodha password | Yes | - |
+| `ZERODHA_TOTP_SECRET` | TOTP secret for 2FA | Yes | - |
+| `ZERODHA_TYPE` | Account type (`user_id` or `corporate`) | No | `user_id` |
+| `ZERODHA_BASE_URL` | Zerodha base URL | No | `https://kite.zerodha.com` |
+| `ZERODHA_LOGIN_URL` | Login endpoint URL | No | `https://kite.zerodha.com/api/login` |
+| `ZERODHA_2FA_URL` | 2FA endpoint URL | No | `https://kite.zerodha.com/api/twofa` |
+| `ZERODHA_HISTORICAL_URL` | Historical API URL template | No | Built-in template |
+| `ZERODHA_KEYRING_TOKEN_KEY` | Keyring token storage key | No | `zerodha_auth_token` |
+| `ZERODHA_KEYRING_ENCRYPTION_KEY` | Keyring encryption key | No | `zerodha_encryption_key` |
+| `ZERODHA_INSTRUMENT_CACHE_TTL` | Instrument cache TTL in minutes | No | `1440` |
+
+Only `ZERODHA_USER_ID`, `ZERODHA_PASSWORD`, and `ZERODHA_TOTP_SECRET` are required for normal use.
+
+### Class Parameters
+
+- `requests_per_second`: API rate limit, clamped to the library's supported range
+- `token_expiry_hours`: Token validity period
+- `cache_ttl_minutes`: Instrument cache TTL in minutes
+- `chunk_failure_mode`: `"strict"` or `"partial"`
+- `user_id`: Runtime override for `ZERODHA_USER_ID`
+- `password`: Runtime override for `ZERODHA_PASSWORD`
+- `totp_secret`: Runtime override for `ZERODHA_TOTP_SECRET`
+- `user_type`: Runtime override for `ZERODHA_TYPE`
+
+## Runtime Configuration Override
 
 You can override environment variables during class instantiation:
 
 ```python
-# Override credentials at runtime (useful when env vars become obsolete)
 fetcher = ZerodhaDataFetcher(
     requests_per_second=3,
     chunk_failure_mode="strict",
     user_id="override_user_id",
-    password="override_password", 
+    password="override_password",
     totp_secret="override_totp_secret",
-    user_type="user_id"  # or "corporate"
+    user_type="user_id",
 )
 ```
 
+This is useful when credentials or account context need to be supplied at runtime instead of through a local `.env` file.
+
 ## Historical Fetch Failure Modes
 
-Historical data fetching now defaults to strict correctness.
+Historical data fetching defaults to strict correctness.
 
-- `chunk_failure_mode="strict"`: any failed chunk raises `DataFetchError`. No partial data is returned.
-- `chunk_failure_mode="partial"`: successful chunks are returned, failed ranges are summarized in one warning log, and an exception is raised only if all chunks fail.
+- `chunk_failure_mode="strict"`: any failed chunk raises `DataFetchError` and no partial data is returned.
+- `chunk_failure_mode="partial"`: successful chunks are returned, failed ranges are summarized in a warning log, and an exception is raised only if all chunks fail.
 
 You can set the default on the fetcher instance or override it per call:
 
@@ -142,12 +212,17 @@ partial_data = fetcher.fetch_historical_data(
 
 ## Logging
 
-`setup_logging()` now uses different defaults for console and file output:
+`setup_logging()` uses separate defaults for console and file output.
 
-- Console: compact human-readable logs such as `20:30:29 INFO zerodha_data_fetcher.core.data_fetcher fetch_historical_data: Data fetch completed successfully`
-- File: richer logs with timestamp, logger, function, line number, and thread name
+- Console output is compact and human-readable, for example:
 
-You can customize each handler independently:
+```text
+(20:30:29) - [INFO] - zerodha_data_fetcher.core.data_fetcher fetch_historical_data: Data fetch completed successfully
+```
+
+- File output includes timestamp, logger, function, line number, and thread name.
+
+Customize each handler independently:
 
 ```python
 setup_logging(
@@ -158,7 +233,7 @@ setup_logging(
 )
 ```
 
-Backward compatibility is preserved:
+Behavior notes:
 
 - `log_format=...` still overrides both handlers
 - `console_format` and `file_format` can be set independently when `log_format` is not provided
@@ -167,252 +242,207 @@ Backward compatibility is preserved:
 
 ## Multi-Account Parallel Processing
 
-For massive data retrieval, you can create multiple instances with different credentials to bypass individual account rate limits:
+For large data retrieval jobs, you can create multiple fetcher instances with different credentials to spread work across accounts.
 
 ```python
-import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 
-# Account configurations
+from zerodha_data_fetcher import ZerodhaDataFetcher
+
 accounts = [
     {
         "user_id": "account1_id",
-        "password": "account1_password", 
-        "totp_secret": "account1_totp_secret"
+        "password": "account1_password",
+        "totp_secret": "account1_totp_secret",
     },
     {
         "user_id": "account2_id",
         "password": "account2_password",
-        "totp_secret": "account2_totp_secret" 
+        "totp_secret": "account2_totp_secret",
     },
     {
         "user_id": "account3_id",
         "password": "account3_password",
-        "totp_secret": "account3_totp_secret"
-    }
+        "totp_secret": "account3_totp_secret",
+    },
 ]
 
+
 def fetch_data_with_account(account_config, symbols_batch):
-    """Fetch data using a specific account for a batch of symbols."""
-    
     fetcher = ZerodhaDataFetcher(
         requests_per_second=3,
         user_id=account_config["user_id"],
         password=account_config["password"],
-        totp_secret=account_config["totp_secret"]
+        totp_secret=account_config["totp_secret"],
     )
-    
+
     results = {}
     end_date = date.today()
     start_date = end_date - timedelta(days=30)
-    
+
     for symbol in symbols_batch:
         try:
             data = fetcher.fetch_historical_data(
                 ticker_token=symbol,
                 start_date=start_date,
                 end_date=end_date,
-                timeframe="minute"
+                timeframe="minute",
             )
             results[symbol] = data
-            print(f"✅ Account {account_config['user_id']}: Fetched {len(data)} records for {symbol}")
-        except Exception as e:
-            print(f"❌ Account {account_config['user_id']}: Failed to fetch {symbol}: {e}")
+            print(f"Fetched {len(data)} records for {symbol} on {account_config['user_id']}")
+        except Exception as exc:
+            print(f"Failed to fetch {symbol} on {account_config['user_id']}: {exc}")
             results[symbol] = None
-    
+
     return results
 
-# Symbols to fetch (split into batches for each account)
-all_symbols = ["RELIANCE", "HDFC", "INFY", "TCS", "ICICIBANK", "SBIN", "BAJFINANCE", "BHARTIARTL", "HDFCBANK"]
 
-# Split symbols across accounts
+all_symbols = [
+    "RELIANCE",
+    "HDFC",
+    "INFY",
+    "TCS",
+    "ICICIBANK",
+    "SBIN",
+    "BAJFINANCE",
+    "BHARTIARTL",
+    "HDFCBANK",
+]
+
 symbols_per_account = len(all_symbols) // len(accounts)
 symbol_batches = [
-    all_symbols[i:i + symbols_per_account] 
+    all_symbols[i:i + symbols_per_account]
     for i in range(0, len(all_symbols), symbols_per_account)
 ]
 
-# Ensure any remaining symbols are included
 if len(symbol_batches) > len(accounts):
     symbol_batches[-2].extend(symbol_batches[-1])
     symbol_batches.pop()
 
-# Execute parallel fetching
 with ThreadPoolExecutor(max_workers=len(accounts)) as executor:
     futures = []
     for i, account in enumerate(accounts):
         if i < len(symbol_batches):
-            future = executor.submit(fetch_data_with_account, account, symbol_batches[i])
-            futures.append(future)
-    
-    # Collect results
+            futures.append(executor.submit(fetch_data_with_account, account, symbol_batches[i]))
+
     all_results = {}
     for future in futures:
-        batch_results = future.result()
-        all_results.update(batch_results)
+        all_results.update(future.result())
 
-print(f"\n🎉 Completed fetching data for {len(all_results)} symbols across {len(accounts)} accounts")
+print(f"Completed fetching data for {len(all_results)} symbols across {len(accounts)} accounts")
 ```
 
 ## Instrument Data Caching
 
-The package bundles a snapshot of Zerodha's instrument list and keeps a
-fresh copy in your local cache directory.
+The package bundles a snapshot of Zerodha's instrument list and keeps a fresh copy in your local cache directory.
 
-### How it works
-- On first use, the package attempts to download the latest instrument data
-  from `https://api.kite.trade/instruments`.
-- If the cached file is younger than the TTL (default: 1440 minutes / 24 h),
-  no download is attempted.
-- If the download fails (no internet, API unavailable), the bundled snapshot
-  is used as a fallback and a warning is logged.
+### How It Works
+
+- On first use, the package attempts to download the latest instrument data from `https://api.kite.trade/instruments`.
+- If the cached file is younger than the TTL, no download is attempted.
+- If the download fails, the bundled snapshot is used as a fallback and a warning is logged.
 
 ### Configuration
+
 | Method | Example |
-|--------|---------|
-| Env var | `ZERODHA_INSTRUMENT_CACHE_TTL=60` (minutes) |
+| ------ | ------- |
+| Environment variable | `ZERODHA_INSTRUMENT_CACHE_TTL=60` |
 | Constructor | `ZerodhaDataFetcher(cache_ttl_minutes=60)` |
 | Constructor | `ZerodhaInstrumentManager(cache_ttl_minutes=60)` |
 
-If `ZERODHA_INSTRUMENT_CACHE_TTL` is invalid, the library logs one warning and
-falls back to `1440` minutes instead of crashing.
+If `ZERODHA_INSTRUMENT_CACHE_TTL` is invalid, the library logs one warning and falls back to `1440` minutes instead of crashing.
 
-### Manual refresh
+### Manual Refresh
+
 ```python
 from zerodha_data_fetcher import refresh_instruments
-refresh_instruments()  # ignores TTL, always downloads
+
+refresh_instruments()
 ```
 
 Cache location:
-- **Windows**: `%LOCALAPPDATA%\zerodha_data_fetcher\Cache\`
-- **Linux/macOS**: `~/.cache/zerodha_data_fetcher/`
 
-## Configuration
-
-### Environment Variables
-
-| Variable | Description | Required | Default |
-|----------|-------------|----------|---------|
-| `ZERODHA_USER_ID` | Your Zerodha user ID | **Yes** | - |
-| `ZERODHA_PASSWORD` | Your Zerodha password | **Yes** | - |
-| `ZERODHA_TOTP_SECRET` | TOTP secret for 2FA ([Setup Guide](https://support.zerodha.com/category/trading-and-markets/general-kite/login-credentials-of-trading-platforms/articles/time-based-otp-setup)) | **Yes** | - |
-| `ZERODHA_TYPE` | Account type (user_id/corporate) | No | `user_id` |
-| `ZERODHA_BASE_URL` | Zerodha base URL | No | `https://kite.zerodha.com` |
-| `ZERODHA_LOGIN_URL` | Login endpoint URL | No | `https://kite.zerodha.com/api/login` |
-| `ZERODHA_2FA_URL` | 2FA endpoint URL | No | `https://kite.zerodha.com/api/twofa` |
-| `ZERODHA_HISTORICAL_URL` | Historical data endpoint template | No | [Default template] |
-| `ZERODHA_KEYRING_TOKEN_KEY` | Keyring token storage key | No | `zerodha_auth_token` |
-| `ZERODHA_KEYRING_ENCRYPTION_KEY` | Keyring encryption key | No | `zerodha_encryption_key` |
-| `ZERODHA_INSTRUMENT_CACHE_TTL` | Instrument cache TTL in minutes | No | `1440` (24 h) |
-
-**Note**: Only `ZERODHA_USER_ID`, `ZERODHA_PASSWORD`, and `ZERODHA_TOTP_SECRET` are required to work. All other variables have sensible defaults and can be overridden during class instantiation if needed.
-
-### Class Parameters
-
-- `requests_per_second`: API rate limit (1-10, default: 2)
-- `token_expiry_hours`: Token validity period (default: 6)
-- `chunk_failure_mode`: `"strict"` by default, or `"partial"` to opt into partial historical fetches
-- `user_id`: Override environment variable
-- `password`: Override environment variable  
-- `totp_secret`: Override environment variable
-- `user_type`: Override environment variable
-- `timeframe`: Data timeframe ('minute', 'day', etc.)
-
-## Sample Output
-
-When you run the basic usage example, you'll see output similar to:
-
-```
-🚀 Zerodha Data Fetcher - Basic Usage Example
-==================================================
-
-📊 Example 1: Fetching data using instrument token
-----------------------------------------
-Fetching data for token 408065 from 2025-08-07 to 2025-09-06
-✅ Success! Retrieved 7500 records
-📅 Date range: 2025-08-07 to 2025-09-05
-🕐 Time range: 09:15 to 15:29
-
-📋 Sample data:
-         Date   Time    Open    High     Low   Close  Volume
-0  2025-08-07  09:15  1430.0  1434.8  1429.0  1434.1   67617
-1  2025-08-07  09:16  1433.3  1434.5  1432.0  1433.3   12890
-2  2025-08-07  09:17  1433.4  1433.5  1432.5  1433.0   15283
-3  2025-08-07  09:18  1433.5  1433.6  1430.7  1430.7   23382
-4  2025-08-07  09:19  1430.9  1431.3  1430.0  1431.0   16791
-
-📊 Example 2: Fetching data using symbol
-----------------------------------------
-✅ Success! Retrieved 7500 records for RELIANCE
-
-🔍 Example 3: Searching for symbols
----------------------------------------- 
-✅ Found 5 matching symbols:
-      Instrument_Token        Name Exchange
-9472         128102404   TATAPOWER      BSE
-9478         128104452   TATAELXSI      BSE
-
-📋 Example 4: Getting instrument information
-----------------------------------------
-✅ Instrument information:
-  Instrument_Token: 128053508
-  Name: INFY
-  FullName: INFOSYS
-```
+- Windows: `%LOCALAPPDATA%\zerodha_data_fetcher\Cache\`
+- Linux/macOS: `~/.cache/zerodha_data_fetcher/`
 
 ## API Reference
 
-### ZerodhaDataFetcher
+### `ZerodhaDataFetcher`
 
 Main class for fetching historical data.
 
-#### Methods
+Methods:
 
-- `fetch_historical_data(ticker_token, start_date, end_date, timeframe='minute', chunk_failure_mode=None)`: Fetch historical data with strict-by-default chunk failure handling
-- `search_symbols(partial_name, limit=10)`: Search for trading symbols  
-- `get_instrument_info(symbol)`: Get instrument information
+- `fetch_historical_data(ticker_token, start_date, end_date, timeframe="minute", chunk_failure_mode=None)`: fetch historical data with strict-by-default chunk failure handling
+- `search_symbols(partial_name, limit=10)`: search the instrument data for matching trading symbols
+- `get_instrument_info(symbol)`: return instrument metadata for a symbol when available
+
+### Package Helpers
+
+- `setup_logging(...)`: configure console and optional rotating file logging
+- `refresh_instruments()`: force-refresh the instrument cache, ignoring TTL
 
 ## Error Handling
 
-The package includes comprehensive error handling:
+The package exposes dedicated exception types for common failure modes:
 
 ```python
 from zerodha_data_fetcher.utils.exceptions import (
-    ZerodhaAPIError,
-    AuthenticationError, 
+    AuthenticationError,
+    DataFetchError,
     InvalidTickerError,
-    DataFetchError
+    ZerodhaAPIError,
 )
 
 try:
     data = fetcher.fetch_historical_data("INVALID", start_date, end_date)
-except InvalidTickerError as e:
-    print(f"Invalid ticker: {e}")
-except AuthenticationError as e:
-    print(f"Auth failed: {e}")
-except DataFetchError as e:
-    print(f"Data fetch failed: {e}")
+except InvalidTickerError as exc:
+    print(f"Invalid ticker: {exc}")
+except AuthenticationError as exc:
+    print(f"Authentication failed: {exc}")
+except DataFetchError as exc:
+    print(f"Data fetch failed: {exc}")
+except ZerodhaAPIError as exc:
+    print(f"Unexpected Zerodha API error: {exc}")
+```
+
+## Development
+
+Contributor setup and workflow guidance live in [CONTRIBUTING.md](CONTRIBUTING.md).
+
+Typical local workflow:
+
+```bash
+uv sync --all-extras
+uv run pytest
+uv run black .
+uv run flake8
+uv run mypy src/
 ```
 
 ## Contributing
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests
-5. Submit a pull request
+Contributions are welcome across bug fixes, docs, tests, and new features.
+
+- Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request
+- Follow the expectations in [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+- Never include real Zerodha credentials in code, issues, or examples
+
+## Security
+
+Please review [SECURITY.md](SECURITY.md) for supported versions, private vulnerability reporting, and credential exposure guidance.
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
 
 ## Disclaimer
 
-This package is for educational and research purposes. Please ensure compliance with Zerodha's terms of service and applicable regulations when using this package.
+This package is for educational and research purposes. Make sure your usage complies with Zerodha's terms of service and any applicable laws or regulations.
 
 ## Support
 
-- 📖 [Documentation](https://github.com/JayceeGupta/Zerodha-Data-Fetcher#readme)
-- 🐛 [Bug Reports](https://github.com/JayceeGupta/Zerodha-Data-Fetcher/issues)
-- 💬 [Discussions](https://github.com/JayceeGupta/Zerodha-Data-Fetcher/discussions)
+- Documentation: https://github.com/JayceeGupta/Zerodha-Data-Fetcher#readme
+- Bug reports: https://github.com/JayceeGupta/Zerodha-Data-Fetcher/issues
+- Discussions: https://github.com/JayceeGupta/Zerodha-Data-Fetcher/discussions

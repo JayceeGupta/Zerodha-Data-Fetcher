@@ -44,7 +44,7 @@ def test_setup_logging_default_formats_split_console_and_file(tmp_path):
     file_output = file_handler.format(record)
 
     assert re.match(
-        r"^\d{2}:\d{2}:\d{2} INFO zerodha_data_fetcher\.core\.data_fetcher fetch_historical_data: Data fetch completed successfully$",
+        r"^\(\d{2}:\d{2}:\d{2}\) - \[INFO\] - zerodha_data_fetcher\.core\.data_fetcher fetch_historical_data: Data fetch completed successfully$",
         console_output,
     )
     assert re.match(
