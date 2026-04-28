@@ -15,14 +15,37 @@ from ..utils.exceptions import AuthenticationError
 load_dotenv()
 logger = logging.getLogger(__name__)
 
+# Browser-like User-Agent required by Zerodha's login endpoint to avoid
+# bot-detection rejection.
+_DEFAULT_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/130.0.0.0 Safari/537.36"
+)
+
 
 class ZerodhaTokenGenerator:
     """Handles generation of Zerodha authentication tokens."""
     
     def __init__(self, config):
-        """Initialize the token generator with configuration."""
+        """
+        Initialize the token generator.
+
+        Args:
+            config: A :class:`~zerodha_data_fetcher.utils.config.Config`
+                instance that supplies Zerodha credentials (user ID,
+                password, TOTP secret) and endpoint URLs.  If ``None``,
+                a default ``Config()`` is created from environment
+                variables.
+
+        Configuration is validated eagerly so that missing credentials
+        are surfaced at construction time rather than mid-authentication.
+
+        Raises:
+            ValueError: If required configuration fields are missing.
+        """
         from ..utils.config import Config
-        
+
         self.config = config or Config()
         
         # Validate required configuration
@@ -52,6 +75,7 @@ class ZerodhaTokenGenerator:
             if totp_secret is None:
                 raise AuthenticationError("TOTP secret not available")
                 
+            # 30-second time window per RFC 6238 (TOTP standard)
             totp = pyotp.TOTP(totp_secret, interval=30)
             logger.debug("TOTP object created successfully")
             return totp.now()
@@ -80,8 +104,7 @@ class ZerodhaTokenGenerator:
         logger.info("Starting auth flow")
         
         try:
-            # Get credentials from validated environment variables
-            # Get credentials from configuration
+            # --- Stage 1: Prepare credentials & generate TOTP ---
             userid = self.config.ZERODHA_USER_ID
             password = self.config.ZERODHA_PASSWORD
             user_type = self.config.ZERODHA_TYPE
@@ -96,7 +119,7 @@ class ZerodhaTokenGenerator:
             totp_value = self.get_totp(totp_secret)
             logger.debug("Generated TOTP successfully")
             
-            # Start session
+            # --- Stage 2: Start browser-like session ---
             session = Session()
             start_session_response = session.get(base_url)
             start_session_response.raise_for_status()
@@ -104,12 +127,12 @@ class ZerodhaTokenGenerator:
 
             # Prepare headers
             generic_headers: Dict[str, str] = {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'User-Agent': _DEFAULT_USER_AGENT,
             }
             
-            # Login request
+            # --- Stage 3: Login with credentials ---
             login_payload = {
                 "user_id": userid,
                 "password": password,
@@ -130,7 +153,7 @@ class ZerodhaTokenGenerator:
             request_id = login_data['data']['request_id']
             logger.debug("Received login request identifier")
 
-            # 2FA request
+            # --- Stage 4: Two-factor authentication ---
             two_factor_payload = {    
                 "user_id": userid, 
                 "request_id": request_id, 
@@ -141,7 +164,7 @@ class ZerodhaTokenGenerator:
             two_factor_response.raise_for_status()
             logger.info("2FA succeeded")
             
-            # Extract enctoken from cookies
+            # --- Stage 5: Extract encrypted token from session cookies ---
             if 'enctoken' not in session.cookies:
                 logger.error("Authentication response did not include an enctoken cookie")
                 raise AuthenticationError("Authentication failed: No enctoken received")
@@ -161,28 +184,57 @@ class ZerodhaTokenGenerator:
             raise AuthenticationError(f"Token generation failed: {str(e)}")
 
 
-# Backward compatibility function
+# ---------------------------------------------------------------------------
+# Legacy API — preserved for backward compatibility only.
+# New code should use ZerodhaTokenGenerator directly.
+# ---------------------------------------------------------------------------
+
 def getEncAuthToken() -> str:
-    """
-    Backward compatibility function for existing code.
-    
+    """Generate an authentication token.
+
+    .. deprecated::
+        Use ``ZerodhaTokenGenerator(config).generate_auth_token()`` instead.
+        This function is retained only so that existing callers continue
+        to work without changes.
+
     Returns:
-        str: Authentication token
+        str: The encrypted authentication token.
     """
+    import warnings
+    warnings.warn(
+        "getEncAuthToken() is deprecated. "
+        "Use ZerodhaTokenGenerator(config).generate_auth_token() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     from ..utils.config import Config
     generator = ZerodhaTokenGenerator(config=Config())
     return generator.generate_auth_token()
 
+
 def get_TOTP(key: str = 'ZERODHA_TOTP_SECRET') -> str:
-    """
-    Backward compatibility function for TOTP generation.
-    
+    """Generate a TOTP value.
+
+    .. deprecated::
+        Use ``ZerodhaTokenGenerator(config).get_totp(secret)`` instead.
+        This function is retained only so that existing callers continue
+        to work without changes.
+
     Args:
-        key: Environment variable name or TOTP secret
-        
+        key: TOTP secret key, **or** the name of an environment variable
+            that holds the secret (detected when *key* is ALL_CAPS with
+            underscores, e.g. ``"ZERODHA_TOTP_SECRET"``).
+
     Returns:
-        str: TOTP value
+        str: The current TOTP value.
     """
+    import warnings
+    warnings.warn(
+        "get_TOTP() is deprecated. "
+        "Use ZerodhaTokenGenerator(config).get_totp(secret) instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     from ..utils.config import Config
     generator = ZerodhaTokenGenerator(config=Config())
     # If key looks like an env var name, get it from environment

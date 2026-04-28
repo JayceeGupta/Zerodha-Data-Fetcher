@@ -157,8 +157,9 @@ class ZerodhaDataFetcher:
         final_df = pd.concat(all_data, ignore_index=True)
         logger.debug("Combined DataFrame shape: %s", final_df.shape)
 
-        final_df["Time"] = final_df["Timestamp"].str[11:16]
-        final_df["Date"] = final_df["Timestamp"].str[:10]
+        # Zerodha returns timestamps as "YYYY-MM-DD HH:MM:SS+ZZZZ"
+        final_df["Time"] = final_df["Timestamp"].str[11:16]   # Extract "HH:MM"
+        final_df["Date"] = final_df["Timestamp"].str[:10]      # Extract "YYYY-MM-DD"
         final_df.sort_values("Timestamp", inplace=True, ignore_index=True)
         final_df.drop(["Timestamp"], axis=1, inplace=True)
 
@@ -329,6 +330,8 @@ class ZerodhaDataFetcher:
 
             columns = ["Timestamp", "Open", "High", "Low", "Close", "Volume", "OI"]
             df = pd.DataFrame(candles, columns=columns)
+            # "OI" = Open Interest; included in the API response but not
+            # relevant for historical OHLCV data, so we drop it.
             df.drop(["OI"], axis=1, inplace=True, errors="ignore")
 
             logger.info(
@@ -627,6 +630,12 @@ class ZerodhaDataFetcher:
             return pd.DataFrame()
 
 
+# ---------------------------------------------------------------------------
+# Legacy API — preserved for backward compatibility only.
+# New code should use ZerodhaDataFetcher directly.
+# ---------------------------------------------------------------------------
+
+
 @execution_timer
 def fetchDataZerodha(
     ticker_token: Union[int, str] = 408065,
@@ -634,8 +643,13 @@ def fetchDataZerodha(
     endDate: date = date(2021, 6, 9),
     reqPerSec: int = 2,
 ) -> pd.DataFrame:
-    """
-    Backward compatibility function for existing code.
+    """Fetch historical data from Zerodha.
+
+    .. deprecated::
+        Use :class:`ZerodhaDataFetcher` and its
+        :meth:`~ZerodhaDataFetcher.fetch_historical_data` method instead.
+        This function is retained only so that existing callers continue
+        to work without changes.
 
     Args:
         ticker_token: Instrument token or symbol.
@@ -646,5 +660,12 @@ def fetchDataZerodha(
     Returns:
         pd.DataFrame: Historical data.
     """
+    import warnings
+    warnings.warn(
+        "fetchDataZerodha() is deprecated. "
+        "Use ZerodhaDataFetcher().fetch_historical_data() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     fetcher = ZerodhaDataFetcher(requests_per_second=reqPerSec)
     return fetcher.fetch_historical_data(ticker_token, startDate, endDate)

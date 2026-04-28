@@ -1,34 +1,3 @@
-# """Utility modules for Zerodha Data Fetcher."""
-
-# from .exceptions import (
-#     ZerodhaAPIError,
-#     AuthenticationError,
-#     InvalidTickerError,
-#     RateLimitError,
-#     DataFetchError,
-#     TokenExpiredError
-# )
-# from .config import Config
-# from .encryption import TokenEncryption
-# from .logging_config import setup_logging, get_logger
-# from .helpers import execution_timer, retry_on_failure
-
-# __all__ = [
-#     "ZerodhaAPIError",
-#     "AuthenticationError", 
-#     "InvalidTickerError",
-#     "RateLimitError",
-#     "DataFetchError",
-#     "TokenExpiredError",
-#     "Config",
-#     "TokenEncryption",
-#     "setup_logging",
-#     "get_logger",
-#     "execution_timer",
-#     "retry_on_failure"
-# ]
-
-
 """
 Utility modules for Zerodha Data Fetcher.
 
@@ -51,7 +20,9 @@ from .exceptions import (
 )
 from .helpers import execution_timer, retry_on_failure
 
-# Try to import data loader if it exists
+# data_loader depends on platformdirs & requests which are core deps,
+# but guard the import so the utils sub-package remains importable
+# even if those optional dependencies are missing at import time.
 try:
     from .data_loader import load_instrument_data, get_package_data_path
     _DATA_LOADER_AVAILABLE = True
