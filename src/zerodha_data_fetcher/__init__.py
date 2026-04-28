@@ -8,10 +8,10 @@ This package provides tools for:
 - Parallel data fetching with error handling
 """
 
-__version__ = "1.0.0"
+__version__ = "1.0.3"
 __author__ = "Jayam Gupta"
 __email__ = "guptajayam47@gmail.com"
-__description__ = "A Python package for fetching historical data from Zerodha API"
+__description__ = "A Python package for fetching historical data from Zerodha API for free"
 __url__ = "https://github.com/JayceeGupta/Zerodha-Data-Fetcher"
 
 # Import main classes and functions for easy access

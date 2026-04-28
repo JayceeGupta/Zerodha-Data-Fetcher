@@ -36,3 +36,15 @@ risk-mitigation-plan*.md
 plan-*.md
 .claude
 test.py
+
+# IDE and editor directories
+.idea/
+.vscode/
+
+# Keys and certificates
+*.key
+*.pem
+
+# Local databases
+*.db
+*.sqlite3

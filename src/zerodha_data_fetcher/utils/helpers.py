@@ -67,8 +67,8 @@ def retry_on_failure(max_retries: int = 3, delay: float = 1.0, backoff: float = 
                     time.sleep(current_delay)
                     current_delay *= backoff
             
-            # This should never be reached, but just in case
-            # raise last_exception
+            # Unreachable: the loop always either returns or raises on the
+            # final attempt.  Kept as a defensive safeguard.
         return wrapper
     return decorator
 

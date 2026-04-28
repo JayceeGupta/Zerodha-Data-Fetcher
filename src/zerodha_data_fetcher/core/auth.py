@@ -18,7 +18,24 @@ logger = logging.getLogger(__name__)
 
 
 class AuthenticationManager:
-    """Manages authentication tokens for Zerodha API."""
+    """Manages authentication tokens for the Zerodha API.
+
+    Token lifecycle:
+      1. **Generate** — perform the full login + 2FA flow via
+         :class:`ZerodhaTokenGenerator` to obtain an ``enctoken``.
+      2. **Encrypt** — encrypt the token with Fernet via
+         :class:`~zerodha_data_fetcher.utils.encryption.TokenEncryption`.
+      3. **Cache** — store the encrypted token, today's date, and a
+         timestamp in the OS keyring (scoped per Zerodha user ID).
+      4. **Reuse** — on subsequent calls within the same day and expiry
+         window, decrypt and return the cached token without hitting
+         the login endpoint again.
+      5. **Invalidate** — delete cached entries when the token expires
+         or the caller explicitly invalidates it.
+
+    Multi-account support: each user ID gets its own keyring entries,
+    so switching between Zerodha accounts does not overwrite tokens.
+    """
     
     def __init__(self, token_expiry_hours: float = Config.DEFAULT_TOKEN_EXPIRY_HOURS, config: Optional['Config'] = None):
         self.token_expiry_hours = token_expiry_hours
@@ -54,14 +71,28 @@ class AuthenticationManager:
         """Delete a keyring entry while tolerating missing backends/values."""
         try:
             keyring.delete_password(self.token_key, account_name)
-        except Exception:
+        except Exception:  # keyring may raise varied exceptions on missing entries
             logger.debug("Keyring entry %s did not need deletion", account_name)
+
+    # ------------------------------------------------------------------
+    # Legacy migration
+    #
+    # v0.x stored tokens in the keyring without user-scoping: a single
+    # "token" / "date" / "timestamp" / "userid" set was shared across
+    # all accounts.  When multiple Zerodha accounts are used on the
+    # same machine, this layout silently overwrites tokens.
+    #
+    # The migration below detects the old layout, rewrites it into the
+    # new per-user format (``<field>:<user_id>``), and deletes the
+    # legacy entries so they don't cause confusion.
+    # ------------------------------------------------------------------
 
     def _migrate_legacy_token_if_applicable(self) -> tuple[Optional[str], Optional[str], Optional[str]]:
         """
         Read the legacy shared token layout when it belongs to the current user.
 
-        On success, rewrites the data into the new per-user layout.
+        On success, rewrites the data into the new per-user layout and
+        removes the old unscoped entries.
         """
         legacy_user_id = keyring.get_password(self.token_key, "userid")
         if legacy_user_id != self._current_user_id:
@@ -89,11 +120,17 @@ class AuthenticationManager:
         Raises:
             AuthenticationError: If token generation fails.
         """
+        # Token retrieval order:
+        # 1. Look up user-scoped token in system keyring
+        # 2. If not found, attempt legacy (unscoped) token migration
+        # 3. If cached token exists and is fresh (same day + within
+        #    expiry window), decrypt and return it
+        # 4. Otherwise, generate a new token via the full login flow
         try:
             expiry_seconds = self.token_expiry_hours * 3600
             today = date.today().strftime('%Y-%m-%d')
             current_time = time.time()
-            
+
             logger.debug("Looking up auth token for user %s on %s", self._current_user_id, today)
             
             encrypted_token, token_date, token_timestamp = self._read_token_bundle(

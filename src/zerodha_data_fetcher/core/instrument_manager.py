@@ -1,5 +1,6 @@
 """Instrument ID management for Zerodha symbols."""
 
+import os
 import logging
 from typing import List, Optional
 
@@ -13,8 +14,16 @@ logger = logging.getLogger(__name__)
 
 
 class ZerodhaInstrumentManager:
-    """Manages Zerodha instrument IDs and symbol lookups."""
+    """Manages Zerodha instrument IDs and symbol lookups.
 
+    Provides methods to resolve trading symbols to Zerodha instrument
+    tokens, search for instruments by partial name, and validate whether
+    a symbol exists.  Instrument data is loaded lazily on first access
+    and cached in memory for the lifetime of the instance.
+    """
+
+    # When a symbol is listed on multiple exchanges, prefer NSE over BSE
+    # because NSE generally has higher liquidity and tighter spreads.
     EXCHANGE_PREFERENCE = ("NSE", "BSE")
 
     def __init__(self,
@@ -22,6 +31,27 @@ class ZerodhaInstrumentManager:
                  commodity_scrip_path: Optional[str] = None,
                  instrument_id_path: Optional[str] = None,
                  cache_ttl_minutes: Optional[int] = None):
+        """
+        Initialize the instrument manager.
+
+        Data is loaded lazily: the instrument CSV is not read until a
+        method actually needs it, then cached in ``_instrument_data`` for
+        subsequent lookups.
+
+        Args:
+            equity_scrip_path: Path to an Excel file containing equity
+                scrip names (column ``'Scrip Name'``).  Optional — only
+                needed when using :meth:`fetch_instrument_ids`.
+            commodity_scrip_path: Path to an Excel file containing
+                commodity scrip names (same column layout).  Optional.
+            instrument_id_path: Path to a custom CSV with Zerodha
+                instrument data.  When omitted, the library uses a
+                cached/bundled copy of the official Kite instruments CSV.
+            cache_ttl_minutes: How long (in minutes) the cached
+                instrument CSV is considered fresh before re-downloading.
+                Defaults to ``ZERODHA_INSTRUMENT_CACHE_TTL`` env var,
+                then 1440 (24 hours).
+        """
         self.equity_scrip_path = equity_scrip_path
         self.commodity_scrip_path = commodity_scrip_path
         self.instrument_id_path = instrument_id_path
@@ -43,7 +73,12 @@ class ZerodhaInstrumentManager:
             logger.info("Using cached/bundled instrument data")
 
     def _load_equity_stocks(self) -> List[str]:
-        """Load equity stock list from Excel file."""
+        """Load equity stock symbols from an NSE/BSE scrip master Excel file.
+
+        Reads the ``'Scrip Name'`` column — the standard column header
+        used by exchange-provided scrip master spreadsheets.  The result
+        is cached in ``_equity_stocks`` so the file is read at most once.
+        """
         if self._equity_stocks is None:
             if not self.equity_scrip_path or not os.path.exists(self.equity_scrip_path):
                 logger.warning("Equity scrip list path not provided or file doesn't exist")
@@ -60,7 +95,12 @@ class ZerodhaInstrumentManager:
         return self._equity_stocks
 
     def _load_commodities(self) -> List[str]:
-        """Load commodity list from Excel file."""
+        """Load commodity symbols from an exchange scrip master Excel file.
+
+        Uses the same ``'Scrip Name'`` column as equity scrip masters.
+        The result is cached in ``_commodities`` so the file is read at
+        most once.
+        """
         if self._commodities is None:
             if not self.commodity_scrip_path or not os.path.exists(self.commodity_scrip_path):
                 logger.warning("Commodity scrip list path not provided or file doesn't exist")
@@ -101,6 +141,10 @@ class ZerodhaInstrumentManager:
                     if 'instrument_token' not in available_columns:
                         raise ZerodhaAPIError("Instrument data missing required 'instrument_token' column")
 
+                # Rename Zerodha API column names to the shorter internal
+                # names used throughout this class.  The Kite instruments
+                # CSV uses lowercase snake_case; we map to PascalCase for
+                # clarity in downstream DataFrame operations.
                 column_mapping = {
                     'instrument_token': 'Instrument_Token',
                     'tradingsymbol': 'Name',
@@ -143,7 +187,15 @@ class ZerodhaInstrumentManager:
         return f"{parts[0]} {parts[-1].replace('-', ' ')}"
 
     def _select_preferred_equity_match(self, matches: pd.DataFrame, exchange: Optional[str] = None) -> pd.DataFrame:
-        """Return the preferred exchange match for an equity symbol."""
+        """Return the single best match for an equity symbol.
+
+        Selection logic:
+          1. If *exchange* is explicitly provided, filter to that exchange.
+          2. Otherwise walk :attr:`EXCHANGE_PREFERENCE` (NSE first, then
+             BSE) and return the first hit.
+          3. If no preferred exchange matches, return the first row as a
+             fallback.
+        """
         if matches.empty:
             return matches
 
@@ -241,11 +293,40 @@ class ZerodhaInstrumentManager:
         return token is not None
 
 
+# ---------------------------------------------------------------------------
+# Legacy API — preserved for backward compatibility only.
+# New code should use ZerodhaInstrumentManager directly.
+# ---------------------------------------------------------------------------
+
+
 def fetchZerodhaID(stock: bool,
                    equity_scrip_path: Optional[str] = None,
                    commodity_scrip_path: Optional[str] = None,
                    instrument_id_path: Optional[str] = None) -> pd.DataFrame:
-    """Backward compatibility function for existing code."""
+    """Fetch instrument IDs for a list of symbols.
+
+    .. deprecated::
+        Use :class:`ZerodhaInstrumentManager` and its
+        :meth:`~ZerodhaInstrumentManager.fetch_instrument_ids` method
+        instead.  This function is retained only so that existing callers
+        continue to work without changes.
+
+    Args:
+        stock: ``True`` for equity stocks, ``False`` for commodities.
+        equity_scrip_path: Path to the equity scrip master Excel file.
+        commodity_scrip_path: Path to the commodity scrip master Excel file.
+        instrument_id_path: Path to a custom Zerodha instruments CSV.
+
+    Returns:
+        pd.DataFrame: Matching instrument data.
+    """
+    import warnings
+    warnings.warn(
+        "fetchZerodhaID() is deprecated. "
+        "Use ZerodhaInstrumentManager().fetch_instrument_ids() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     manager = ZerodhaInstrumentManager(
         equity_scrip_path=equity_scrip_path,
         commodity_scrip_path=commodity_scrip_path,

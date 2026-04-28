@@ -9,13 +9,38 @@ from dotenv import load_dotenv
 load_dotenv()
 logger = logging.getLogger(__name__)
 
-# ENCRYPTION_KEY = os.getenv("ZERODHA_KEYRING_ENCRYPTION_KEY", "")
-
 class TokenEncryption:
-    """Handles encryption and decryption of authentication tokens."""
+    """Handles encryption and decryption of authentication tokens.
+
+    Uses `Fernet symmetric encryption <https://cryptography.io/en/latest/fernet/>`_
+    (AES-128-CBC + HMAC-SHA256) for token encryption.  The encryption
+    key is itself stored in the OS keyring so that it persists across
+    sessions without being written to disk in plaintext.
+    """
+
+    # Default service name used in the system keyring to store/retrieve
+    # the Fernet encryption key.
+    DEFAULT_KEYRING_SERVICE_NAME = "ZerodhaEncryptionKey"
 
     def __init__(self, encryption_key: str = ""):
-        self.encryption_key = encryption_key or os.getenv("ZERODHA_KEYRING_ENCRYPTION_KEY", "ZerodhaEncryptionKey")
+        """
+        Initialize token encryption.
+
+        The keyring service name is resolved in this order:
+          1. *encryption_key* parameter (if non-empty).
+          2. ``ZERODHA_KEYRING_ENCRYPTION_KEY`` environment variable.
+          3. :attr:`DEFAULT_KEYRING_SERVICE_NAME` (``"ZerodhaEncryptionKey"``).
+
+        Args:
+            encryption_key: Keyring service name under which the Fernet
+                key is stored.  Leave empty to use the env var or default.
+
+        Raises:
+            ValueError: If the resolved key is empty.
+        """
+        self.encryption_key = encryption_key or os.getenv(
+            "ZERODHA_KEYRING_ENCRYPTION_KEY", self.DEFAULT_KEYRING_SERVICE_NAME
+        )
         if not self.encryption_key:
             raise ValueError("Encryption key must be provided")
 

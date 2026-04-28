@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Optional
 
 
-DEFAULT_CONSOLE_FORMAT = "%(asctime)s %(levelname)s %(name)s %(funcName)s: %(message)s"
+DEFAULT_CONSOLE_FORMAT = "(%(asctime)s) - [%(levelname)s] - %(name)s %(funcName)s: %(message)s"
 DEFAULT_FILE_FORMAT = (
     "%(asctime)s | %(levelname)s | %(name)s | %(funcName)s:%(lineno)d | "
     "%(threadName)s | %(message)s"
