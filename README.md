@@ -117,6 +117,20 @@ Only the three credential variables are required. Everything else has a working 
 | `ZERODHA_KEYRING_TOKEN_KEY` | Keyring key for the auth token | No | `zerodha_auth_token` |
 | `ZERODHA_KEYRING_ENCRYPTION_KEY` | Keyring key for the encryption key | No | `zerodha_encryption_key` |
 | `ZERODHA_INSTRUMENT_CACHE_TTL` | Instrument cache TTL, in minutes | No | `1440` |
+| `ZERODHA_TOKEN_STORE` | Credential storage mode: `auto`, `keyring`, or `file` | No | `auto` |
+| `ZERODHA_TOKEN_STORE_PATH` | Path to the file token store (file/fallback mode) | No | Platform user data dir |
+
+### Headless / server deployment
+
+On desktop machines the encrypted auth token and its encryption key live in the OS keyring. Headless Linux servers, minimal Docker images, and CI runners often have **no keyring backend**, which previously made the first login crash with `NoKeyringError`.
+
+`ZERODHA_TOKEN_STORE` controls what happens there:
+
+- **`auto`** (default) — use the keyring if a backend is available; otherwise fall back to a JSON file in the platform user-data directory (`ZERODHA_TOKEN_STORE_PATH` to override), created with owner-only (`0600`) permissions. A one-time warning is logged when the fallback activates.
+- **`keyring`** — require the OS keyring; raise if no backend is present. Use this when you never want secrets written to disk.
+- **`file`** — always use the file store and skip the keyring entirely.
+
+In `auto`/`file` mode the file store protects secrets only with filesystem permissions, not an OS secret service — restrict access to the host and the store path accordingly.
 
 ### Constructor arguments
 

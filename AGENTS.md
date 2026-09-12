@@ -22,7 +22,8 @@ src/zerodha_data_fetcher/
   utils/
     config.py            Config — loads env vars / .env, defaults, validation
     data_loader.py       Instrument CSV: download, cache with TTL, bundled fallback
-    encryption.py        Fernet token encryption; key stored in keyring
+    encryption.py        Fernet token encryption; key stored via secret_store
+    secret_store.py      Keyring wrapper with a file fallback for headless hosts
     exceptions.py        Exception hierarchy (ZerodhaAPIError is the base)
     helpers.py           @retry_on_failure (backoff) and @execution_timer decorators
     logging_config.py    setup_logging() — console + rotating file handlers
@@ -81,4 +82,5 @@ Note the asymmetry: PR CI tests one Python version, but publish tests 3.8–3.12
 - **`requests_per_second` is clamped to 1–10** (`Config.MIN/MAX_REQUESTS_PER_SECOND`); values outside the range are silently adjusted, not rejected.
 - **The bundled instrument CSV is large (~6.7 MB)** and shipped in the wheel (`package-data` in `pyproject.toml`). The publish workflow refreshes it; locally it can be stale, which affects symbol lookups until the cache TTL expires or `refresh_instruments()` is called.
 - **Running code outside tests touches the real OS keyring** and may prompt for keychain access on first use. Tests avoid this via an in-memory keyring fixture.
+- **Credential storage goes through `utils/secret_store.py`, not `keyring` directly.** It tries the OS keyring and falls back to a `0600` JSON file when no backend exists (headless Linux/containers/CI), governed by `ZERODHA_TOKEN_STORE` (`auto`/`keyring`/`file`) and `ZERODHA_TOKEN_STORE_PATH`. Route any new credential reads/writes through `secret_store` so they stay deployable on headless hosts; tests patch `secret_store`, not `keyring`.
 - **Generated/local paths** (`htmlcov/`, `.coverage`, `.pytest_cache/`, `.uv-cache/`, `.venv/`, `logs/`) are safe to delete and are recreated on demand.

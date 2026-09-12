@@ -20,9 +20,9 @@ def memory_keyring(monkeypatch):
     def delete_password(service, username):
         store.pop((service, username), None)
 
-    monkeypatch.setattr(auth_module.keyring, "get_password", get_password)
-    monkeypatch.setattr(auth_module.keyring, "set_password", set_password)
-    monkeypatch.setattr(auth_module.keyring, "delete_password", delete_password)
+    monkeypatch.setattr(auth_module.secret_store, "get_password", get_password)
+    monkeypatch.setattr(auth_module.secret_store, "set_password", set_password)
+    monkeypatch.setattr(auth_module.secret_store, "delete_password", delete_password)
     return store
 
 

@@ -2,9 +2,10 @@
 
 import os
 import logging
-import keyring
 from cryptography.fernet import Fernet
 from dotenv import load_dotenv
+
+from . import secret_store
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -55,12 +56,12 @@ class TokenEncryption:
             bytes: The encryption key as bytes.
         """
         logger.debug("Retrieving encryption key from keyring")
-        encryption_key = keyring.get_password(self.encryption_key, "key")
+        encryption_key = secret_store.get_password(self.encryption_key, "key")
 
         if encryption_key is None:
             logger.warning("Encryption key not found in keyring. Generating new key")
             encryption_key = Fernet.generate_key().decode()
-            keyring.set_password(self.encryption_key, "key", encryption_key)
+            secret_store.set_password(self.encryption_key, "key", encryption_key)
             logger.info("New encryption key generated and stored in keyring")
         else:
             logger.debug("Existing encryption key retrieved successfully")
