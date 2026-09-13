@@ -118,6 +118,56 @@ def select_contract(
     return _to_contract(frame.iloc[idx], expiries[idx], selector)
 
 
+@dataclass(frozen=True)
+class SelectionResult:
+    """Everything the manager needs to apply a freshness policy.
+
+    ``contract`` is the strict selection (``None`` when the requested
+    position does not exist).  ``is_stale`` is ``True`` only for forward
+    selectors when contracts exist but none expire on/after the cutoff.
+    ``latest_listed`` is the most recent contract (best-guess for a stale
+    forward query); ``newest_available_expiry`` is its expiry.
+    """
+
+    contract: Optional[ResolvedContract]
+    is_stale: bool
+    newest_available_expiry: Optional[date]
+    latest_listed: Optional[ResolvedContract]
+
+
+def resolve(
+    contracts: pd.DataFrame,
+    selector: str,
+    *,
+    as_of: Optional[date] = None,
+    roll_offset_days: int = 0,
+) -> SelectionResult:
+    """Resolve a roll selector and report freshness facts (no policy here).
+
+    Freshness is assessed only for forward selectors (``near``/``near_next``):
+    the file is stale-for-near-month when contracts exist but none expire on
+    or after the roll cutoff.  ``near_prev`` is exempt (it is backward-looking).
+    """
+    contract = select_contract(
+        contracts, selector, as_of=as_of, roll_offset_days=roll_offset_days
+    )
+
+    frame, expiries = _sorted_contracts(contracts)
+    if not expiries:
+        return SelectionResult(contract, False, None, None)
+
+    newest = expiries[-1]
+    latest_listed = _to_contract(frame.iloc[-1], newest, selector)
+
+    if selector in FORWARD_SELECTORS:
+        cutoff = (as_of or date.today()) + timedelta(days=roll_offset_days)
+        is_stale = not any(e >= cutoff for e in expiries)
+    else:
+        is_stale = False
+
+    return SelectionResult(contract, is_stale, newest, latest_listed)
+
+
 def select_specific_contract(
     contracts: pd.DataFrame,
     year: int,

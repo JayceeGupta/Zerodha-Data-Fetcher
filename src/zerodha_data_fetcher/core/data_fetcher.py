@@ -446,6 +446,83 @@ class ZerodhaDataFetcher:
         return date_ranges
 
     @execution_timer
+    def fetch_futures_historical_data(
+        self,
+        underlying: str,
+        start_date: date,
+        end_date: date,
+        *,
+        selector: str = "near",
+        year: Optional[int] = None,
+        month: Optional[int] = None,
+        exchange: str = "MCX",
+        segment: str = "MCX-FUT",
+        timeframe: str = "minute",
+        roll_offset_days: int = 0,
+        on_stale: Optional[str] = None,
+        chunk_failure_mode: Optional[ChunkFailureMode] = None,
+    ) -> pd.DataFrame:
+        """Resolve one futures contract for *underlying*, then fetch it.
+
+        The historical fetch path is instrument-token driven, so this method
+        only adds contract resolution on top of :meth:`fetch_historical_data`;
+        the output schema is unchanged: ``[Date, Time, Open, High, Low, Close,
+        Volume]``.
+
+        Args:
+            underlying: Underlying name (e.g. ``"GOLD"``), matched exactly.
+            selector: ``"near"``/``"near_prev"``/``"near_next"`` (by expiry) or
+                ``"specific"`` (requires *year* and *month*).
+            year, month: Required when ``selector == "specific"``.
+            roll_offset_days: Roll the ``near`` contract this many days before
+                expiry (see :meth:`ZerodhaInstrumentManager.resolve_futures_contract`).
+            on_stale: Freshness policy for forward selectors; ``None`` uses the
+                instrument manager's default.
+
+        Raises:
+            ValueError: If ``selector == "specific"`` without *year*/*month*,
+                or if no contract can be resolved for the request.
+        """
+        if selector == "specific":
+            if year is None or month is None:
+                raise ValueError(
+                    "selector='specific' requires both 'year' and 'month'."
+                )
+            contract = self.instrument_manager.resolve_specific_contract(
+                underlying, year, month, exchange=exchange, segment=segment
+            )
+        else:
+            contract = self.instrument_manager.resolve_futures_contract(
+                underlying,
+                selector,
+                exchange=exchange,
+                segment=segment,
+                roll_offset_days=roll_offset_days,
+                on_stale=on_stale,
+            )
+
+        if contract is None:
+            raise ValueError(
+                "Could not resolve a %s futures contract for %r (selector=%r)."
+                % (segment, underlying, selector)
+            )
+
+        logger.info(
+            "Resolved %s %s → %s (token %s, expiry %s)",
+            underlying,
+            selector,
+            contract.tradingsymbol,
+            contract.instrument_token,
+            contract.expiry,
+        )
+        return self.fetch_historical_data(
+            contract.instrument_token,
+            start_date,
+            end_date,
+            timeframe=timeframe,
+            chunk_failure_mode=chunk_failure_mode,
+        )
+
     def fetch_historical_data(
         self,
         ticker_token: Union[int, str],

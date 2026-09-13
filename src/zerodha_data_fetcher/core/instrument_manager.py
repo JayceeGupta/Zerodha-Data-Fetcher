@@ -2,13 +2,14 @@
 
 import os
 import logging
+from dataclasses import replace
 from datetime import date
 from typing import List, Optional
 
 import pandas as pd
 
 from ..utils.config import Config
-from ..utils.exceptions import ZerodhaAPIError
+from ..utils.exceptions import StaleInstrumentDataError, ZerodhaAPIError
 from ..utils.data_loader import (
     load_instrument_data,
     download_instruments,
@@ -16,9 +17,13 @@ from ..utils.data_loader import (
 )
 from .contract_selector import (
     ResolvedContract,
-    select_contract,
+    SelectionResult,
+    resolve as resolve_selection,
     select_specific_contract,
 )
+
+# Allowed values for the near-month freshness policy (see resolve_futures_contract).
+ON_STALE_POLICIES = ("ignore", "warn", "error", "refresh")
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +47,7 @@ class ZerodhaInstrumentManager:
         commodity_scrip_path: Optional[str] = None,
         instrument_id_path: Optional[str] = None,
         cache_ttl_minutes: Optional[int] = None,
+        on_stale: str = "warn",
     ):
         """
         Initialize the instrument manager.
@@ -67,6 +73,7 @@ class ZerodhaInstrumentManager:
         self.equity_scrip_path = equity_scrip_path
         self.commodity_scrip_path = commodity_scrip_path
         self.instrument_id_path = instrument_id_path
+        self.on_stale = self._validate_on_stale(on_stale)
 
         # Resolve TTL: param → env var → default (1440 = 24 h)
         if cache_ttl_minutes is not None:
@@ -318,6 +325,14 @@ class ZerodhaInstrumentManager:
 
         return matches.drop(columns="_expiry_dt").reset_index(drop=True)
 
+    @staticmethod
+    def _validate_on_stale(on_stale: str) -> str:
+        if on_stale not in ON_STALE_POLICIES:
+            raise ValueError(
+                "on_stale must be one of %s, got %r" % (ON_STALE_POLICIES, on_stale)
+            )
+        return on_stale
+
     def resolve_futures_contract(
         self,
         underlying: str,
@@ -327,21 +342,93 @@ class ZerodhaInstrumentManager:
         segment: str = "MCX-FUT",
         as_of: Optional[date] = None,
         roll_offset_days: int = 0,
+        on_stale: Optional[str] = None,
     ) -> Optional[ResolvedContract]:
         """Resolve the near / previous-listed / next-listed futures contract.
 
         Loads the full futures list for *underlying* (including expired
         contracts, so ``near_prev`` can look back) and delegates to the pure
-        selector.  Returns ``None`` when the requested contract does not
-        exist.
+        selector.  Returns ``None`` when the requested contract does not exist.
+
+        For forward selectors (``near``/``near_next``) the *on_stale* policy
+        governs what happens when the loaded file has no contract expiring on
+        or after the roll cutoff (``None`` → the instance default):
+
+        - ``ignore``  : return the strict result (``None``) silently.
+        - ``warn``    : log a warning and return the most recent listed
+          contract as a best-guess, flagged ``stale=True``.
+        - ``error``   : raise :class:`StaleInstrumentDataError`.
+        - ``refresh`` : force-download once, reload, and re-resolve; if still
+          stale, degrade to ``warn``.
         """
+        policy = self._validate_on_stale(on_stale or self.on_stale)
+
+        result = self._resolve_selection(
+            underlying,
+            selector,
+            exchange=exchange,
+            segment=segment,
+            as_of=as_of,
+            roll_offset_days=roll_offset_days,
+        )
+
+        if not result.is_stale:
+            return result.contract
+
+        if policy == "refresh":
+            if self.refresh_instruments():
+                refreshed = self._resolve_selection(
+                    underlying,
+                    selector,
+                    exchange=exchange,
+                    segment=segment,
+                    as_of=as_of,
+                    roll_offset_days=roll_offset_days,
+                )
+                if not refreshed.is_stale:
+                    return refreshed.contract
+                result = refreshed
+            policy = "warn"  # refresh didn't help → degrade, do not loop
+
+        if policy == "ignore":
+            return result.contract
+
+        message = (
+            "Instrument file is stale for near-month %s: newest available "
+            "expiry %s is before the roll cutoff (as_of=%s). "
+            "Call refresh_instruments() for current contracts."
+            % (underlying, result.newest_available_expiry, as_of or date.today())
+        )
+        if policy == "error":
+            raise StaleInstrumentDataError(message)
+
+        # warn
+        logger.warning(message)
+        if result.latest_listed is None:
+            return None
+        return replace(
+            result.latest_listed,
+            stale=True,
+            newest_available_expiry=result.newest_available_expiry,
+        )
+
+    def _resolve_selection(
+        self,
+        underlying: str,
+        selector: str,
+        *,
+        exchange: str,
+        segment: str,
+        as_of: Optional[date],
+        roll_offset_days: int,
+    ) -> SelectionResult:
         contracts = self.get_futures_contracts(
             underlying,
             exchange=exchange,
             segment=segment,
             include_expired=True,
         )
-        return select_contract(
+        return resolve_selection(
             contracts,
             selector,
             as_of=as_of,

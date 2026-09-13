@@ -21,6 +21,7 @@ try:
     # Core functionality
     from .core.data_fetcher import ZerodhaDataFetcher, fetchDataZerodha
     from .core.instrument_manager import ZerodhaInstrumentManager, fetchZerodhaID
+    from .core.contract_selector import ResolvedContract
     from .core.auth import AuthenticationManager
     from .core.rate_limiter import RateLimitedThreadPoolExecutor
 
@@ -33,6 +34,7 @@ try:
         InvalidTickerError,
         DataFetchError,
         TokenExpiredError,
+        StaleInstrumentDataError,
     )
 
     # Public API - what users can import
@@ -40,6 +42,7 @@ try:
         # Main classes
         "ZerodhaDataFetcher",
         "ZerodhaInstrumentManager",
+        "ResolvedContract",
         "AuthenticationManager",
         "Config",
         # Backward compatibility functions
@@ -56,6 +59,7 @@ try:
         "InvalidTickerError",
         "DataFetchError",
         "TokenExpiredError",
+        "StaleInstrumentDataError",
         # Package metadata
         "__version__",
         "__author__",
