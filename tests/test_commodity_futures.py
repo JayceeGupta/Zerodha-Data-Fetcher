@@ -4,13 +4,6 @@ import pandas as pd
 
 from zerodha_data_fetcher.core.instrument_manager import ZerodhaInstrumentManager
 
-_RAW_TO_LOWER = {
-    "Instrument_Token": "instrument_token",
-    "Name": "tradingsymbol",
-    "FullName": "name",
-    "Exchange": "exchange",
-}
-
 
 def _patch_loader(monkeypatch, df: pd.DataFrame) -> None:
     monkeypatch.setattr(
@@ -72,6 +65,62 @@ def test_get_futures_contracts_excludes_options(monkeypatch, sample_mcx_futures_
     # No CE/PE (MCX-OPT) rows even though their name is GOLD.
     assert not result["InstrumentType"].isin(["CE", "PE"]).any()
     assert (result["Segment"] == "MCX-FUT").all()
+
+
+def test_resolve_futures_contract_near_delegates_to_selector(
+    monkeypatch, sample_mcx_futures_df
+):
+    from datetime import date
+
+    _patch_loader(monkeypatch, sample_mcx_futures_df)
+    manager = ZerodhaInstrumentManager()
+
+    contract = manager.resolve_futures_contract("GOLD", "near", as_of=date(2024, 11, 1))
+
+    assert contract.tradingsymbol == "GOLD24DECFUT"
+    assert contract.instrument_token == 113
+
+
+def test_resolve_futures_contract_respects_underlying_exactly(
+    monkeypatch, sample_mcx_futures_df
+):
+    from datetime import date
+
+    _patch_loader(monkeypatch, sample_mcx_futures_df)
+    manager = ZerodhaInstrumentManager()
+
+    contract = manager.resolve_futures_contract(
+        "SILVER", "near", as_of=date(2024, 8, 1)
+    )
+
+    # SILVERM must never be returned for a SILVER query.
+    assert contract.tradingsymbol == "SILVER24SEPFUT"
+
+
+def test_resolve_futures_contract_unknown_underlying_returns_none(
+    monkeypatch, sample_mcx_futures_df
+):
+    from datetime import date
+
+    _patch_loader(monkeypatch, sample_mcx_futures_df)
+    manager = ZerodhaInstrumentManager()
+
+    assert (
+        manager.resolve_futures_contract("PLATINUM", "near", as_of=date(2024, 8, 1))
+        is None
+    )
+
+
+def test_resolve_specific_contract_matches_named_month(
+    monkeypatch, sample_mcx_futures_df
+):
+    _patch_loader(monkeypatch, sample_mcx_futures_df)
+    manager = ZerodhaInstrumentManager()
+
+    contract = manager.resolve_specific_contract("GOLD", 2024, 12)
+
+    assert contract.tradingsymbol == "GOLD24DECFUT"
+    assert contract.instrument_token == 113
 
 
 def _write_csv(path, rows) -> str:

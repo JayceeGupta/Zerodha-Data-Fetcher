@@ -14,6 +14,11 @@ from ..utils.data_loader import (
     download_instruments,
     get_cache_path,
 )
+from .contract_selector import (
+    ResolvedContract,
+    select_contract,
+    select_specific_contract,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -312,6 +317,54 @@ class ZerodhaInstrumentManager:
             matches = matches[keep]
 
         return matches.drop(columns="_expiry_dt").reset_index(drop=True)
+
+    def resolve_futures_contract(
+        self,
+        underlying: str,
+        selector: str = "near",
+        *,
+        exchange: str = "MCX",
+        segment: str = "MCX-FUT",
+        as_of: Optional[date] = None,
+        roll_offset_days: int = 0,
+    ) -> Optional[ResolvedContract]:
+        """Resolve the near / previous-listed / next-listed futures contract.
+
+        Loads the full futures list for *underlying* (including expired
+        contracts, so ``near_prev`` can look back) and delegates to the pure
+        selector.  Returns ``None`` when the requested contract does not
+        exist.
+        """
+        contracts = self.get_futures_contracts(
+            underlying,
+            exchange=exchange,
+            segment=segment,
+            include_expired=True,
+        )
+        return select_contract(
+            contracts,
+            selector,
+            as_of=as_of,
+            roll_offset_days=roll_offset_days,
+        )
+
+    def resolve_specific_contract(
+        self,
+        underlying: str,
+        year: int,
+        month: int,
+        *,
+        exchange: str = "MCX",
+        segment: str = "MCX-FUT",
+    ) -> Optional[ResolvedContract]:
+        """Resolve a specific ``(year, month)`` futures contract by expiry."""
+        contracts = self.get_futures_contracts(
+            underlying,
+            exchange=exchange,
+            segment=segment,
+            include_expired=True,
+        )
+        return select_specific_contract(contracts, year, month)
 
     def _normalize_commodity_symbol(self, symbol: str) -> Optional[str]:
         """Normalize commodity lookup strings into the bundled data format."""
