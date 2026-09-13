@@ -52,9 +52,11 @@ class ResolvedContract:
     segment: str             # "MCX-FUT"
     exchange: str            # "MCX"
     selector: str            # "near" | "near_prev" | "near_next" | "specific"
+    stale: bool = False      # True if resolved from a stale-for-near-month file (§4.4)
+    newest_available_expiry: Optional[date] = None  # newest FUT expiry seen for this underlying
 ```
 
-`@dataclass(frozen=True)` is 3.8-safe. `ResolvedContract` is what all selection methods return, so callers get the token *and* the audit trail (which contract, which expiry, which selector rule fired).
+`@dataclass(frozen=True)` is 3.8-safe. `ResolvedContract` is what all selection methods return, so callers get the token *and* the audit trail (which contract, which expiry, which selector rule fired). `stale`/`newest_available_expiry` let a caller using `on_stale="warn"` (§4.4) inspect freshness programmatically without parsing log output.
 
 ### 1.2 New methods on `ZerodhaInstrumentManager`
 
@@ -86,8 +88,13 @@ def resolve_futures_contract(
     segment: str = "MCX-FUT",
     as_of: Optional[date] = None,
     roll_offset_days: int = 0,         # roll N days before expiry (§4)
+    on_stale: Optional[str] = None,    # "ignore"|"warn"|"error"|"refresh"; None → instance default (§4.4)
 ) -> Optional["ResolvedContract"]:
-    """Resolve near / previous-listed / next-listed contract by expiry."""
+    """Resolve near / previous-listed / next-listed contract by expiry.
+
+    For forward selectors (near/near_next), applies the freshness policy
+    in §4.4 when the loaded file has no contract expiring on/after cutoff.
+    """
 
 def resolve_specific_contract(
     self,
@@ -121,6 +128,7 @@ def fetch_futures_historical_data(
     segment: str = "MCX-FUT",
     timeframe: str = "minute",
     roll_offset_days: int = 0,
+    on_stale: Optional[str] = None,    # forwarded to resolution (§4.4)
     chunk_failure_mode: Optional[ChunkFailureMode] = None,
 ) -> "pd.DataFrame":
     """Resolve one MCX futures contract, then fetch it via the existing
@@ -136,6 +144,7 @@ def fetch_futures_bundle(
     selectors: "Sequence[str]" = ("near_prev", "near", "near_next"),
     timeframe: str = "minute",
     roll_offset_days: int = 0,
+    on_stale: Optional[str] = None,    # forwarded to resolution (§4.4)
     chunk_failure_mode: Optional[ChunkFailureMode] = None,
 ) -> "Dict[str, pd.DataFrame]":
     """Resolve and fetch several selectors for one underlying concurrently,
@@ -274,6 +283,25 @@ Mitigations (in preference order, all already have hooks):
 
 All three selectors read the **same in-memory DataFrame** and differ only by list index (§2.3). Resolution is pure pandas with no API calls (discovery §4), so resolving near/prev/next concurrently is cheap and race-free (read-only access to a shared frame). `fetch_futures_bundle` resolves all requested selectors up front (cheap), de-duplicates identical tokens (e.g. if `near_next` doesn't exist it's dropped), then fans the *fetches* out under one shared limiter (§5). Each selector's fetch runs on its own thread as required, but they share the pacing budget.
 
+### 4.4 Freshness / reconciliation policy for forward selectors (discovery §8)
+
+**Reconciliation strategy = whole-file replacement, already implemented (discovery §8).** New contracts arrive via `download_instruments` (`data_loader.py:81`, the public `https://api.kite.trade/instruments` bulk dump) on TTL lapse or `refresh_instruments()` — there is **no** per-symbol scrip fetch and **no** row-level merge, and we deliberately do not build one. This subsection only adds *detection* of a file too stale to answer a forward-looking query, plus a configurable response.
+
+**Staleness signal (pure, no network).** In `contract_selector.py`, compute for the requested underlying: `future = [c for c in contracts if c.expiry >= cutoff]` (`cutoff` from §2.3/§4.1). The file is **stale-for-near-month** when `future` is empty (no contract expiring on/after cutoff). Only `near`/`near_next` consult this; `near_prev` and `specific` are exempt (they rely on expired-contract retention, §9, not freshness). Also compute `newest_available_expiry = max(expiry for all contracts of the underlying)` for actionable messaging.
+
+**`on_stale` policy** (per-call param on `resolve_futures_contract`/`fetch_futures_*`, plus an instance default set in `ZerodhaInstrumentManager.__init__` / `ZerodhaDataFetcher.__init__`; per-call `None` → instance default; instance default `"warn"`):
+
+| Value | Behavior when stale-for-near-month |
+|---|---|
+| `"ignore"` | Return best available (or `None`) with no signal — today's behavior. |
+| `"warn"` (default) | `logger.warning(...)` naming `newest_available_expiry` vs `as_of`; return the best-guess contract with `stale=True`. **Non-breaking.** |
+| `"error"` | Raise `StaleInstrumentDataError` (new, in `core/contract_selector.py` or the manager's errors module). Message includes underlying, `newest_available_expiry`, `as_of`, and "call `refresh_instruments()`". |
+| `"refresh"` | Call `self.refresh_instruments()` **once** (force-download, `instrument_manager.py:215`), reload the frame, re-resolve. If still stale, **degrade to `warn`** (do not loop, do not raise). The **only** policy that performs a network call — opt-in. |
+
+**Placement & layering.** The pure staleness computation lives in `contract_selector.py` (unit-testable with injected `as_of`, no I/O). The `"refresh"` action requires the manager (it owns `refresh_instruments()` and the loaded frame), so the manager method interprets the policy: selector returns `(contract, is_stale, newest_expiry)`; the manager decides warn/error/refresh. This keeps the selector network-free (preserves the discovery §4 "resolution is pure in-memory" property) while the manager owns the one optional refresh. Validate `on_stale` against the allowed set and raise `ValueError` on an unknown value.
+
+**Bundled-fallback corroboration.** When the loader used the bundled CSV (max expiry 2025-06-05, discovery §5), the content signal already fires for any current `as_of`, so no separate `source` flag is threaded through in this pass — noted as a possible later refinement if we want to warn even when a bundled file happens to still contain a future contract.
+
 ---
 
 ## 5. Concurrency / rate-limit design (discovery §4, §7.2 — resolves a real risk)
@@ -358,6 +386,19 @@ All instrument tests monkeypatch `zerodha_data_fetcher.core.instrument_manager.l
 18. `RateLimitedThreadPoolExecutor` with an injected `rate_limiter` uses it; without one, constructs its own (back-compat).
 19. Output schema of the futures fetch is exactly `[Date, Time, Open, High, Low, Close, Volume]` (unchanged; reuse `dummy_chunk_df`).
 
+### 7.5 Freshness-policy tests (discovery §8, plan §4.4)
+
+Use `sample_mcx_futures_df` with a **fixed `as_of` set AFTER every expiry in the fixture** (so the file is stale-for-near-month), plus a fresh-file case (`as_of` before the latest expiry).
+
+20. **`warn` (default):** stale file + `near` → returns the best-guess contract with `stale=True` and `newest_available_expiry` set; a warning is logged (assert via `caplog`). No exception.
+21. **`error`:** stale file + `near`/`on_stale="error"` → raises `StaleInstrumentDataError`; message contains the underlying and `newest_available_expiry`.
+22. **`refresh`:** stale file + `on_stale="refresh"` → `refresh_instruments` is called exactly once (spy/monkeypatch); after a monkeypatched refresh swaps in a fresh frame, resolution returns a non-stale contract. If the refresh still yields a stale frame, it degrades to `warn` (no raise, no second refresh — assert call count == 1).
+23. **`ignore`:** stale file + `on_stale="ignore"` → no warning logged, `stale` left `False`, best-guess (or `None`) returned.
+24. **Fresh file:** `as_of` before latest expiry → `stale=False`, no warning, regardless of `on_stale`.
+25. **Exempt selectors:** `near_prev` and `specific(year, month)` never trigger the stale policy even on a stale-for-near file (assert no warning / no raise).
+26. **Unknown policy value** → `ValueError`.
+27. **Instance default vs per-call:** manager constructed with `on_stale="error"` raises on stale `near`; a per-call `on_stale="warn"` overrides it to warn (per-call `None` uses the instance default).
+
 ---
 
 ## 8. Phased rollout (ordered, independently shippable)
@@ -370,9 +411,9 @@ Acceptance: tests 10–13, and `get_futures_contracts("GOLD")` returns only MCX-
 Scope: §2 `contract_selector.py` + `resolve_futures_contract` (near/prev/next) + `resolve_specific_contract`, `ResolvedContract` dataclass.
 Acceptance: tests 1–9. Selectors correct against non-consecutive expiries and collision families. No fetch/network involved. Shippable (pure resolution API).
 
-**Phase 3 — Auto-rollover + single-contract fetch.**
-Scope: §4 roll timing (`roll_offset_days`, cutoff logic), TTL/refresh guidance, `fetch_futures_historical_data` wiring resolution into the existing single-executor fetch path.
-Acceptance: tests 14, 15, 19; documented expiry-day refresh workflow; near-month re-resolves as `as_of` advances (deterministic test with injected dates). Shippable (single-contract commodity fetch end to end).
+**Phase 3 — Auto-rollover + freshness policy + single-contract fetch.**
+Scope: §4 roll timing (`roll_offset_days`, cutoff logic), §4.4 `on_stale` freshness policy (`StaleInstrumentDataError`, `ResolvedContract.stale`/`newest_available_expiry`, instance-default + per-call flag, opt-in `"refresh"`), TTL/refresh guidance, `fetch_futures_historical_data` wiring resolution into the existing single-executor fetch path.
+Acceptance: tests 14, 15, 19, 20–27; documented expiry-day refresh workflow; near-month re-resolves as `as_of` advances (deterministic test with injected dates). Shippable (single-contract commodity fetch end to end).
 
 **Phase 4 — Concurrency hardening + bundle fetch.**
 Scope: §5 injectable shared limiter on `RateLimitedThreadPoolExecutor`, `fetch_futures_bundle` with one shared limiter/executor across contracts, per-thread selector resolution.
