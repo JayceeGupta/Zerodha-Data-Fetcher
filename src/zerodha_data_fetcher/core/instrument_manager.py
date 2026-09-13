@@ -2,6 +2,7 @@
 
 import os
 import logging
+from datetime import date
 from typing import List, Optional
 
 import pandas as pd
@@ -152,14 +153,23 @@ class ZerodhaInstrumentManager:
                             "Custom Zerodha instrument ID file not found"
                         )
 
+                    # Keep the equity columns plus the derivative-aware
+                    # columns needed for futures selection, but only those
+                    # actually present — older/custom CSVs that lack expiry/
+                    # segment/instrument_type must still load (they simply
+                    # won't support futures resolution).
+                    desired_columns = [
+                        "instrument_token",
+                        "tradingsymbol",
+                        "name",
+                        "exchange",
+                        "expiry",
+                        "segment",
+                        "instrument_type",
+                    ]
                     self._instrument_data = pd.read_csv(
                         self.instrument_id_path,
-                        usecols=[
-                            "instrument_token",
-                            "tradingsymbol",
-                            "name",
-                            "exchange",
-                        ],
+                        usecols=lambda col: col in desired_columns,
                     )
                 else:
                     self._instrument_data = load_instrument_data(
@@ -193,6 +203,12 @@ class ZerodhaInstrumentManager:
                     "tradingsymbol": "Name",
                     "name": "FullName",
                     "exchange": "Exchange",
+                    # Derivative-aware columns (commodity futures selection).
+                    # The underlying/grouping key is FullName (raw ``name``),
+                    # NOT Name (raw ``tradingsymbol``).
+                    "expiry": "Expiry",
+                    "segment": "Segment",
+                    "instrument_type": "InstrumentType",
                 }
                 existing_mapping = {
                     k: v
@@ -229,6 +245,73 @@ class ZerodhaInstrumentManager:
             self._instrument_data = None
             logger.info("Instrument data refreshed successfully.")
         return ok
+
+    # Columns required for futures-contract selection. Absent on custom
+    # CSVs that predate derivative support — treated as "no futures here".
+    _FUTURES_COLUMNS = ("FullName", "Expiry", "Segment", "InstrumentType")
+
+    def get_futures_contracts(
+        self,
+        underlying: str,
+        *,
+        exchange: str = "MCX",
+        segment: str = "MCX-FUT",
+        include_expired: bool = False,
+        as_of: Optional[date] = None,
+    ) -> pd.DataFrame:
+        """Return all futures contracts for one *underlying*, sorted by expiry.
+
+        Matches ``FullName`` (the underlying, e.g. ``GOLD``) on **exact
+        equality** — never substring — so prefix families like ``GOLDM`` /
+        ``GOLDPETAL`` are not swept in.  Filtered to ``Exchange``/``Segment``
+        and ``InstrumentType == "FUT"``.  Rows are sorted ascending by parsed
+        ``Expiry``; unparseable expiries are dropped.  When *include_expired*
+        is ``False`` (default), contracts whose expiry is before *as_of*
+        (default ``date.today()``) are excluded.
+
+        Returns an empty DataFrame when the source lacks the derivative
+        columns (e.g. a custom 4-column CSV) or when nothing matches.
+        """
+        data = self._load_instrument_data()
+
+        missing = [c for c in self._FUTURES_COLUMNS if c not in data.columns]
+        if missing:
+            logger.warning(
+                "Instrument data missing futures columns %s; "
+                "no futures contracts available.",
+                missing,
+            )
+            return data.iloc[0:0]
+
+        target = str(underlying).strip().upper()
+        mask = (
+            (data["Exchange"] == exchange.strip().upper())
+            & (data["Segment"] == segment.strip().upper())
+            & (data["InstrumentType"] == "FUT")
+            & (data["FullName"].astype(str).str.strip().str.upper() == target)
+        )
+        matches = data[mask].copy()
+        if matches.empty:
+            return matches
+
+        parsed = pd.to_datetime(matches["Expiry"], errors="coerce")
+        unparseable = parsed.isna()
+        if unparseable.any():
+            logger.debug(
+                "Dropping %d %s futures row(s) with unparseable expiry.",
+                int(unparseable.sum()),
+                target,
+            )
+        matches = matches[~unparseable]
+        parsed = parsed[~unparseable]
+        matches = matches.assign(_expiry_dt=parsed).sort_values("_expiry_dt")
+
+        if not include_expired:
+            cutoff = as_of or date.today()
+            keep = matches["_expiry_dt"].dt.date >= cutoff
+            matches = matches[keep]
+
+        return matches.drop(columns="_expiry_dt").reset_index(drop=True)
 
     def _normalize_commodity_symbol(self, symbol: str) -> Optional[str]:
         """Normalize commodity lookup strings into the bundled data format."""
