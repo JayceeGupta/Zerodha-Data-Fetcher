@@ -7,8 +7,7 @@ import time
 from datetime import date
 from typing import Optional
 
-import keyring
-
+from ..utils import secret_store
 from ..utils.config import Config
 from ..utils.exceptions import AuthenticationError
 from ..utils.encryption import TokenEncryption
@@ -64,30 +63,30 @@ class AuthenticationManager:
     ) -> tuple[Optional[str], Optional[str], Optional[str]]:
         """Read token metadata from keyring."""
         return (
-            keyring.get_password(self.token_key, token_account),
-            keyring.get_password(self.token_key, date_account),
-            keyring.get_password(self.token_key, timestamp_account),
+            secret_store.get_password(self.token_key, token_account),
+            secret_store.get_password(self.token_key, date_account),
+            secret_store.get_password(self.token_key, timestamp_account),
         )
 
     def _write_token_bundle(
         self, encrypted_token: str, token_date: str, token_timestamp: str
     ) -> None:
         """Persist a user-scoped token bundle in keyring."""
-        keyring.set_password(
+        secret_store.set_password(
             self.token_key, self._scoped_account_name("token"), encrypted_token
         )
-        keyring.set_password(
+        secret_store.set_password(
             self.token_key, self._scoped_account_name("date"), token_date
         )
-        keyring.set_password(
+        secret_store.set_password(
             self.token_key, self._scoped_account_name("timestamp"), token_timestamp
         )
 
     def _delete_password_best_effort(self, account_name: str) -> None:
         """Delete a keyring entry while tolerating missing backends/values."""
         try:
-            keyring.delete_password(self.token_key, account_name)
-        except Exception:  # keyring may raise varied exceptions on missing entries
+            secret_store.delete_password(self.token_key, account_name)
+        except Exception:  # store may raise varied exceptions on missing entries
             logger.debug("Keyring entry %s did not need deletion", account_name)
 
     # ------------------------------------------------------------------
@@ -112,7 +111,7 @@ class AuthenticationManager:
         On success, rewrites the data into the new per-user layout and
         removes the old unscoped entries.
         """
-        legacy_user_id = keyring.get_password(self.token_key, "userid")
+        legacy_user_id = secret_store.get_password(self.token_key, "userid")
         if legacy_user_id != self._current_user_id:
             return None, None, None
 
