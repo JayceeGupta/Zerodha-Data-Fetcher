@@ -13,7 +13,7 @@ import stat
 import sys
 
 import pytest
-from keyring.errors import NoKeyringError
+from keyring.errors import NoKeyringError, PasswordSetError
 
 from zerodha_data_fetcher.utils import secret_store
 
@@ -117,3 +117,32 @@ def test_file_store_round_trips_via_json(file_store, no_keyring):
     secret_store.set_password("svc", "user", "secret")
     data = json.loads(file_store.read_text(encoding="utf-8"))
     assert data == {f"svc{secret_store._KEY_SEPARATOR}user": "secret"}
+
+
+def test_operational_keyring_error_does_not_fall_back(file_store, monkeypatch):
+    """A working-but-failing keyring must not silently downgrade to disk."""
+
+    def _raise(*_args, **_kwargs):
+        raise PasswordSetError("keyring is present but locked")
+
+    monkeypatch.setattr(secret_store.keyring, "set_password", _raise)
+    with pytest.raises(PasswordSetError):
+        secret_store.set_password("svc", "user", "secret")
+    # The secret must not have leaked to the plaintext file store.
+    assert not file_store.exists()
+
+
+@pytest.mark.parametrize("bad_mode", ["keyring-only", "disk", "yes"])
+def test_invalid_mode_raises(file_store, monkeypatch, bad_mode):
+    monkeypatch.setenv("ZERODHA_TOKEN_STORE", bad_mode)
+    with pytest.raises(ValueError):
+        secret_store.get_password("svc", "user")
+
+
+def test_mode_is_whitespace_and_case_insensitive(
+    file_store, working_keyring, monkeypatch
+):
+    """`_mode()` normalises casing/whitespace before validating."""
+    monkeypatch.setenv("ZERODHA_TOKEN_STORE", "  KEYRING  ")
+    secret_store.set_password("svc", "user", "secret")
+    assert working_keyring[("svc", "user")] == "secret"

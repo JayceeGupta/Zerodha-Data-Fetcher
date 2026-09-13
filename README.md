@@ -7,7 +7,7 @@
 
 Fetch historical OHLC data from Zerodha Kite using your normal account login. It logs in the way the Kite web app does (user ID, password, TOTP), so it does **not** require a paid Kite Connect API subscription.
 
-It returns a pandas DataFrame, resolves trading symbols to instrument tokens for you, splits long date ranges into chunks fetched in parallel, paces requests to stay within rate limits, and caches the auth token (encrypted) in your OS keyring between runs.
+It returns a pandas DataFrame, resolves trading symbols to instrument tokens for you, splits long date ranges into chunks fetched in parallel, paces requests to stay within rate limits, and caches the auth token (encrypted) between runs — in your OS keyring, or in a permission-restricted file when no keyring backend is available (see [Headless / server deployment](#headless--server-deployment)).
 
 ## How it works (and what to know before you rely on it)
 
@@ -114,8 +114,8 @@ Only the three credential variables are required. Everything else has a working 
 | `ZERODHA_LOGIN_URL` | Login endpoint | No | `…/api/login` |
 | `ZERODHA_2FA_URL` | 2FA endpoint | No | `…/api/twofa` |
 | `ZERODHA_HISTORICAL_URL` | Historical data URL template | No | Built-in template |
-| `ZERODHA_KEYRING_TOKEN_KEY` | Keyring key for the auth token | No | `zerodha_auth_token` |
-| `ZERODHA_KEYRING_ENCRYPTION_KEY` | Keyring key for the encryption key | No | `zerodha_encryption_key` |
+| `ZERODHA_KEYRING_TOKEN_KEY` | Keyring service name for the auth token | No | `ZerodhaAuthToken` |
+| `ZERODHA_KEYRING_ENCRYPTION_KEY` | Keyring service name for the encryption key | No | `ZerodhaEncryptionKey` |
 | `ZERODHA_INSTRUMENT_CACHE_TTL` | Instrument cache TTL, in minutes | No | `1440` |
 | `ZERODHA_TOKEN_STORE` | Credential storage mode: `auto`, `keyring`, or `file` | No | `auto` |
 | `ZERODHA_TOKEN_STORE_PATH` | Path to the file token store (file/fallback mode) | No | Platform user data dir |
@@ -126,11 +126,11 @@ On desktop machines the encrypted auth token and its encryption key live in the 
 
 `ZERODHA_TOKEN_STORE` controls what happens there:
 
-- **`auto`** (default) — use the keyring if a backend is available; otherwise fall back to a JSON file in the platform user-data directory (`ZERODHA_TOKEN_STORE_PATH` to override), created with owner-only (`0600`) permissions. A one-time warning is logged when the fallback activates.
+- **`auto`** (default) — use the keyring if a backend is available; otherwise fall back to a JSON file in the platform user-data directory (`ZERODHA_TOKEN_STORE_PATH` to override). The fallback activates **only** when no keyring backend exists — a present-but-failing keyring (locked, misconfigured) raises rather than silently writing secrets to disk. A one-time warning is logged when the fallback activates.
 - **`keyring`** — require the OS keyring; raise if no backend is present. Use this when you never want secrets written to disk.
 - **`file`** — always use the file store and skip the keyring entirely.
 
-In `auto`/`file` mode the file store protects secrets only with filesystem permissions, not an OS secret service — restrict access to the host and the store path accordingly.
+In `auto`/`file` mode the file store protects secrets only with filesystem permissions, not an OS secret service — restrict access to the host and the store path accordingly. The owner-only (`0600` file / `0700` directory) permissions are enforced on **POSIX** systems; on Windows those calls are no-ops, so the default per-user profile location provides the protection and a custom `ZERODHA_TOKEN_STORE_PATH` is **not** made owner-only automatically. The file store is atomic per process but has no cross-process lock; concurrent writers can lose an update (worst case: a redundant re-login).
 
 ### Constructor arguments
 

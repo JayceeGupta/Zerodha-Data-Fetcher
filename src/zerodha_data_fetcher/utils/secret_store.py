@@ -23,6 +23,17 @@ Override the file location with ``ZERODHA_TOKEN_STORE_PATH``.
 All three functions mirror the ``keyring`` API used by the rest of the package
 (:func:`get_password`, :func:`set_password`, :func:`delete_password`), so call
 sites treat this module as a drop-in replacement for ``keyring``.
+
+Limitations of the file store:
+
+* The ``0600`` file / ``0700`` directory permissions are a POSIX guarantee. On
+  Windows those ``chmod`` calls are effectively no-ops; the default store lives
+  under the per-user profile directory (already ACL-scoped to the user), but a
+  custom ``ZERODHA_TOKEN_STORE_PATH`` on Windows is not made owner-only here.
+* Writes are atomic per process (exclusive temp file + ``os.replace``), but the
+  store is not guarded by a cross-process lock. Multiple processes writing
+  concurrently can lose an update; for the auth flow the worst case is a
+  redundant re-authentication, not a corrupt file.
 """
 
 from __future__ import annotations
@@ -31,12 +42,13 @@ import json
 import logging
 import os
 import stat
+import tempfile
 from pathlib import Path
 from threading import Lock
 from typing import Dict, Optional
 
 import keyring
-from keyring.errors import KeyringError
+from keyring.errors import NoKeyringError
 from platformdirs import user_data_path
 
 logger = logging.getLogger(__name__)
@@ -45,6 +57,7 @@ _MODE_ENV = "ZERODHA_TOKEN_STORE"
 _PATH_ENV = "ZERODHA_TOKEN_STORE_PATH"
 _CREDENTIALS_FILENAME = "credentials.json"
 _KEY_SEPARATOR = "\x00"
+_VALID_MODES = ("auto", "keyring", "file")
 
 # Guard file reads/writes; keyring is expected to be thread-safe itself.
 _file_lock = Lock()
@@ -53,8 +66,19 @@ _warned_fallback = False
 
 
 def _mode() -> str:
-    """Return the configured storage mode (``auto`` / ``keyring`` / ``file``)."""
-    return (os.getenv(_MODE_ENV) or "auto").strip().lower() or "auto"
+    """Return the configured storage mode (``auto`` / ``keyring`` / ``file``).
+
+    Raises:
+        ValueError: If ``ZERODHA_TOKEN_STORE`` is set to an unrecognised value.
+            Failing loud prevents a typo (e.g. ``keyring-only``) from silently
+            enabling the disk fallback an operator meant to forbid.
+    """
+    mode = (os.getenv(_MODE_ENV) or "auto").strip().lower() or "auto"
+    if mode not in _VALID_MODES:
+        raise ValueError(
+            f"Invalid {_MODE_ENV}={mode!r}; expected one of {_VALID_MODES}."
+        )
+    return mode
 
 
 def _file_path() -> Path:
@@ -99,20 +123,39 @@ def _read_store() -> Dict[str, str]:
 
 
 def _write_store(data: Dict[str, str]) -> None:
-    """Atomically write the file store with owner-only permissions."""
+    """Atomically write the file store with owner-only permissions.
+
+    Uses an exclusive, randomly-named temp file created by
+    :func:`tempfile.mkstemp` (``O_EXCL`` + mode ``0600`` on POSIX) in the target
+    directory, then fsyncs and atomically renames it over the destination. This
+    avoids the predictable-``.tmp``-path symlink attack and the umask window a
+    plain ``write_text`` would leave open before ``chmod``.
+    """
     path = _file_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
+    directory = path.parent
+    directory.mkdir(parents=True, exist_ok=True)
     try:
-        os.chmod(path.parent, stat.S_IRWXU)  # 0700; best effort (no-op on Windows)
+        os.chmod(directory, stat.S_IRWXU)  # 0700; best effort (no-op on Windows)
     except OSError:
         pass
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(json.dumps(data), encoding="utf-8")
+
+    payload = json.dumps(data).encode("utf-8")
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=path.name + ".", suffix=".tmp", dir=str(directory)
+    )
     try:
-        os.chmod(tmp, stat.S_IRUSR | stat.S_IWUSR)  # 0600
-    except OSError:
-        pass
-    tmp.replace(path)  # atomic; inherits the tmp file's permissions
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_name, path)  # atomic; keeps the temp file's 0600 mode
+    except BaseException:
+        # Never leave a stray temp file holding secrets behind on failure.
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
 
 
 def _file_get(service: str, username: str) -> Optional[str]:
@@ -147,7 +190,7 @@ def get_password(service: str, username: str) -> Optional[str]:
         return keyring.get_password(service, username)
     try:
         return keyring.get_password(service, username)
-    except KeyringError as exc:
+    except NoKeyringError as exc:
         _warn_fallback(exc)
         return _file_get(service, username)
 
@@ -163,7 +206,7 @@ def set_password(service: str, username: str, password: str) -> None:
         return
     try:
         keyring.set_password(service, username, password)
-    except KeyringError as exc:
+    except NoKeyringError as exc:
         _warn_fallback(exc)
         _file_set(service, username, password)
 
@@ -179,6 +222,6 @@ def delete_password(service: str, username: str) -> None:
         return
     try:
         keyring.delete_password(service, username)
-    except KeyringError as exc:
+    except NoKeyringError as exc:
         _warn_fallback(exc)
         _file_delete(service, username)
