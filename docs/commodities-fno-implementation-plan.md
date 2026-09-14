@@ -432,6 +432,21 @@ Each phase leaves `main`-mergeable state: existing signatures preserved, new sur
 
 Carried forward from discovery §7. These are **operational unknowns about the undocumented `oms` endpoint** and must be verified with a real enctoken **before** or during Phase 3 (they gate the fetch, not the resolution logic, so Phases 1–2 can proceed in parallel).
 
+### 9.0 Live verification results (probed 2026-09-14, real account)
+
+Throwaway probes against the live endpoint with real credentials settled the two biggest unknowns:
+
+- **Q1 — MCX historical permission + live near-month: CONFIRMED WORKING.** `refresh_instruments()` downloads a master containing live GOLD MCX-FUT contracts; `resolve_futures_contract("GOLD","near")` → `GOLD26OCTFUT`, and `fetch_historical_data(token, …, timeframe="day")` returned real candles in the exact `[Date, Time, Open, High, Low, Close, Volume]` schema. **near / near_next / a currently-listed `specific` month are fully functional live.**
+- **Q2/Q3 — expired-contract history: NOT AVAILABLE.** Two independent walls:
+  1. **The instrument master contains only currently-listed contracts.** The fresh GOLD dump held six contracts, all *future-dated* (2026-10 … 2027-08); there were **no expired rows**. So `near_prev` and any past-month `specific` **resolve to `None`** — the token isn't in the file to begin with. (Live `resolve_futures_contract("GOLD","near_prev")` returned `None`.)
+  2. **The endpoint rejects expired tokens outright.** Fetching known expired GOLD tokens from the old snapshot (e.g. `GOLD24DECFUT`=109175815) returned HTTP 400 `{"message":"invalid token","error_type":"InputException"}`, and `_validate_ticker_token` raised `InvalidTickerError` before any candle request. So even with a token in hand, expired-contract candles are not served.
+
+**Consequences for the shipped feature:**
+- `near`, `near_next`, and current/future `specific` months: **live-verified working.**
+- `near_prev` and past `specific` months: **effectively inert** — expired contracts are neither in the master nor served by the endpoint. Keep the code (correct, and harmless when it returns `None`), but document that it cannot reach already-expired contracts via this data source.
+- `fetch_futures_continuous` / back-adjustment (Phase 5): can only stitch **currently-listed** contracts (all future-dated, so shallow history today); it **cannot** build deep back-history across expired monthly contracts from this endpoint. The stitching logic remains correct for whatever the fetch path returns.
+- Risk 4 (`_validate_ticker_token` on expired/thin contracts) is answered: it **fails closed** (raises) on an unknown/expired token rather than passing an empty 200.
+
 1. **MCX historical permission on the account** (discovery §7.1, high priority). Confirm the `oms/.../historical` endpoint returns candles for an MCX-FUT token for the target user. If the segment isn't enabled, the whole feature is inert for that account. *Gate for Phase 3.*
 2. **Expired-contract historical availability + retention depth** (discovery §7.3). Can the endpoint return candles for an already-expired token? Needed for `near_prev` and historical `specific` months. Determine the retention window. *Gate for Phase 2/3 usefulness and Phase 5.*
 3. **`_validate_ticker_token` on expired/thin contracts** (discovery §3 caveat, §7.4; `data_fetcher.py:179-233`). It probes a 28-day `minute` window ending today; for an expired contract this may be empty. Confirm an empty-but-valid 200 is treated as pass (only `invalid token`/`TokenException` fail it). If empty responses fail, add a validation bypass or widen the probe window for expired selectors. *Gate for Phase 3.*
