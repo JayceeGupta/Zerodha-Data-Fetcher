@@ -22,6 +22,7 @@ try:
     from .core.data_fetcher import ZerodhaDataFetcher, fetchDataZerodha
     from .core.instrument_manager import ZerodhaInstrumentManager, fetchZerodhaID
     from .core.contract_selector import ResolvedContract
+    from .core.continuous import stitch_segments
     from .core.auth import AuthenticationManager
     from .core.rate_limiter import RateLimitedThreadPoolExecutor
 
@@ -43,6 +44,7 @@ try:
         "ZerodhaDataFetcher",
         "ZerodhaInstrumentManager",
         "ResolvedContract",
+        "stitch_segments",
         "AuthenticationManager",
         "Config",
         # Backward compatibility functions

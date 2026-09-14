@@ -419,9 +419,10 @@ Acceptance: tests 14, 15, 19, 20–27; documented expiry-day refresh workflow; n
 Scope: §5 injectable shared limiter on `RateLimitedThreadPoolExecutor`, `fetch_futures_bundle` with one shared limiter/executor across contracts, per-thread selector resolution.
 Acceptance: tests 16, 17, 18; measured request rate stays within `requests_per_second` for multi-contract fetches (unit-level spy on limiter calls). Shippable (multi-contract concurrent fetch, rate-safe).
 
-**Phase 5 (deferred, gated) — Continuous/back-adjusted stitching.**
-Scope: §6 decision, only after §9 live checks confirm expired-contract retention + OI/volume reliability. Add `adjust="none"|"ratio"|"diff"` with pinned as-of anchor; optionally stop dropping the OI column (`data_fetcher.py:349-351`).
-Acceptance: reproducible stitched series for a fixed as-of; explicit product sign-off on default. Not part of the initial feature.
+**Phase 5 — Continuous/back-adjusted stitching. (IMPLEMENTED — code only.)**
+Scope: §6 decision. Pure `core/continuous.py::stitch_segments` windows per-contract frames by calendar expiry and applies `adjust="none"` (default, no fabrication), `"ratio"`, or `"diff"` back-adjustment with the newest contract as the unadjusted anchor. `ZerodhaDataFetcher.fetch_futures_continuous` enumerates in-range contracts, fetches them under one shared limiter (Phase 4), and stitches. `stitch_segments` is exported at package level.
+Default decision: `adjust="none"` ships as default (no fabricated data, stable schema); `ratio`/`diff` are opt-in and re-anchor history when the newest contract changes, so pin the contract range for reproducibility. Roll rule is calendar expiry (zero new data); OI-crossover roll and un-dropping the OI column (`data_fetcher.py:349-351`) remain future work.
+Still gated operationally by §9: usefulness on real data depends on expired-contract retention on the `oms` endpoint (live-unverified). Tests are fully mocked on synthetic frames.
 
 Each phase leaves `main`-mergeable state: existing signatures preserved, new surface additive, tests green.
 

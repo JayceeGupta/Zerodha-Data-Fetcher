@@ -21,6 +21,7 @@ from ..utils.exceptions import (
 from ..utils.helpers import execution_timer, retry_on_failure
 from .auth import AuthenticationManager
 from .instrument_manager import ZerodhaInstrumentManager
+from .continuous import stitch_segments
 from .rate_limiter import RateLimitedThreadPoolExecutor, RequestRateLimiter
 
 logger = logging.getLogger(__name__)
@@ -603,6 +604,95 @@ class ZerodhaDataFetcher:
                     results[selector] = frame
 
         return results
+
+    def fetch_futures_continuous(
+        self,
+        underlying: str,
+        start_date: date,
+        end_date: date,
+        *,
+        adjust: str = "none",
+        exchange: str = "MCX",
+        segment: str = "MCX-FUT",
+        timeframe: str = "minute",
+        chunk_failure_mode: Optional[ChunkFailureMode] = None,
+    ) -> pd.DataFrame:
+        """Build a front-month continuous series across the date range.
+
+        Enumerates the futures contracts of *underlying* active within
+        ``[start_date, end_date]``, fetches each (concurrently, under one
+        shared rate limiter), and stitches them by expiry via
+        :func:`~zerodha_data_fetcher.core.continuous.stitch_segments`.
+
+        The roll rule is calendar expiry (each contract owns the bars up to
+        its expiry).  ``adjust`` is ``"none"`` (raw, default), ``"ratio"``, or
+        ``"diff"`` — back-adjustment re-anchors history when the newest
+        contract changes, so pin the range for reproducibility.
+
+        Note:
+            Historical data for already-expired contracts depends on the
+            broker endpoint's retention window; this method is only as complete
+            as what the fetch path returns for each contract.
+
+        Returns:
+            One chronological DataFrame, or empty if no contracts are found.
+        """
+        contracts = self.instrument_manager.get_futures_contracts(
+            underlying,
+            exchange=exchange,
+            segment=segment,
+            include_expired=True,
+        )
+        if contracts.empty or "Expiry" not in contracts.columns:
+            logger.warning(
+                "fetch_futures_continuous found no futures contracts for %r.",
+                underlying,
+            )
+            return pd.DataFrame()
+
+        parsed = pd.to_datetime(contracts["Expiry"], errors="coerce")
+        contracts = contracts.assign(_expiry=parsed.dt.date).dropna(subset=["_expiry"])
+        contracts = contracts.sort_values("_expiry")
+
+        # Contracts covering the range: expiry on/after start, up to and
+        # including the first contract expiring on/after end.
+        selected: List[Tuple[int, date]] = []
+        for _, row in contracts.iterrows():
+            expiry = row["_expiry"]
+            if expiry < start_date:
+                continue
+            selected.append((int(row["Instrument_Token"]), expiry))
+            if expiry >= end_date:
+                break
+
+        if not selected:
+            logger.warning(
+                "fetch_futures_continuous found no contracts in range for %r.",
+                underlying,
+            )
+            return pd.DataFrame()
+
+        shared_limiter = RequestRateLimiter(self.requests_per_second)
+        frames: Dict[int, pd.DataFrame] = {}
+        with ThreadPoolExecutor(max_workers=len(selected)) as pool:
+            future_to_token = {
+                pool.submit(
+                    self.fetch_historical_data,
+                    token,
+                    start_date,
+                    end_date,
+                    timeframe=timeframe,
+                    chunk_failure_mode=chunk_failure_mode,
+                    rate_limiter=shared_limiter,
+                ): token
+                for token, _ in selected
+            }
+            for future in as_completed(future_to_token):
+                token = future_to_token[future]
+                frames[token] = future.result()
+
+        segments = [(expiry, frames[token]) for token, expiry in selected]
+        return stitch_segments(segments, adjust=adjust)
 
     def fetch_historical_data(
         self,
