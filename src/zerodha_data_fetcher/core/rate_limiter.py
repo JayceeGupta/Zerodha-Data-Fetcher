@@ -65,20 +65,34 @@ class RateLimitedThreadPoolExecutor(ThreadPoolExecutor):
     that previously used a plain ``ThreadPoolExecutor``.
     """
 
-    def __init__(self, max_workers=None, requests_per_second=1, **kwargs):
+    def __init__(
+        self, max_workers=None, requests_per_second=1, rate_limiter=None, **kwargs
+    ):
         """
         Args:
             max_workers: Maximum number of concurrent threads (passed
                 through to :class:`ThreadPoolExecutor`).
             requests_per_second: Target pacing — the shared rate limiter
                 allows at most this many requests per second across *all*
-                worker threads.
+                worker threads.  Ignored when *rate_limiter* is supplied.
+            rate_limiter: An existing :class:`RequestRateLimiter` to reuse.
+                When provided, this executor paces against that shared
+                limiter instead of constructing its own — so several
+                executors can honor a single global rate (see
+                :meth:`ZerodhaDataFetcher.fetch_futures_bundle`).
             **kwargs: Additional keyword arguments forwarded to
                 :class:`ThreadPoolExecutor`.
 
         Raises:
-            ValueError: If *requests_per_second* is zero or negative.
+            ValueError: If *requests_per_second* is zero or negative and no
+                *rate_limiter* is supplied.
         """
+        if rate_limiter is not None:
+            super().__init__(max_workers=max_workers, **kwargs)
+            self._rate_limiter = rate_limiter
+            self.requests_per_second = rate_limiter.requests_per_second
+            return
+
         if requests_per_second <= 0:
             raise ValueError("requests_per_second must be greater than 0")
 

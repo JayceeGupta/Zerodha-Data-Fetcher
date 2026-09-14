@@ -322,10 +322,12 @@ class FakeExecutor:
         max_workers: Optional[int] = None,
         requests_per_second: Optional[int] = None,
         future_factory: Optional[Callable[[Any, tuple], FakeFuture]] = None,
+        rate_limiter: Any = None,
     ):
         self.max_workers = max_workers
         self.requests_per_second = requests_per_second
         self.future_factory = future_factory
+        self.rate_limiter = rate_limiter
         self.submitted_params = []
         self.shutdown_called = False
 

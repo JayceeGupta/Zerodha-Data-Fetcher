@@ -3,9 +3,10 @@
 import json
 import logging
 import threading
-from concurrent.futures import as_completed
+from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, timedelta
-from typing import Any, Dict, List, Literal, Optional, Tuple, Union
+from typing import Any, Dict, List, Literal, Optional, Sequence, Tuple, Union
 
 import pandas as pd
 import requests
@@ -20,7 +21,7 @@ from ..utils.exceptions import (
 from ..utils.helpers import execution_timer, retry_on_failure
 from .auth import AuthenticationManager
 from .instrument_manager import ZerodhaInstrumentManager
-from .rate_limiter import RateLimitedThreadPoolExecutor
+from .rate_limiter import RateLimitedThreadPoolExecutor, RequestRateLimiter
 
 logger = logging.getLogger(__name__)
 
@@ -523,6 +524,86 @@ class ZerodhaDataFetcher:
             chunk_failure_mode=chunk_failure_mode,
         )
 
+    def fetch_futures_bundle(
+        self,
+        underlying: str,
+        start_date: date,
+        end_date: date,
+        *,
+        selectors: Sequence[str] = ("near_prev", "near", "near_next"),
+        exchange: str = "MCX",
+        segment: str = "MCX-FUT",
+        timeframe: str = "minute",
+        roll_offset_days: int = 0,
+        on_stale: Optional[str] = None,
+        chunk_failure_mode: Optional[ChunkFailureMode] = None,
+    ) -> Dict[str, pd.DataFrame]:
+        """Resolve and fetch several selectors for one underlying concurrently.
+
+        Each selector's fetch runs on its own thread, but all contracts share
+        a single :class:`RequestRateLimiter`, so the effective request rate
+        stays within ``requests_per_second`` no matter how many contracts are
+        fetched (rather than N × the budget from N independent executors).
+
+        Selectors that resolve to ``None`` are dropped; selectors resolving to
+        the same instrument token are fetched once and share the result frame.
+
+        Returns:
+            A dict keyed by selector; each value is the historical DataFrame
+            (schema ``[Date, Time, Open, High, Low, Close, Volume]``).  Empty
+            dict if nothing resolves.
+        """
+        resolved: Dict[str, "object"] = {}
+        for selector in selectors:
+            contract = self.instrument_manager.resolve_futures_contract(
+                underlying,
+                selector,
+                exchange=exchange,
+                segment=segment,
+                roll_offset_days=roll_offset_days,
+                on_stale=on_stale,
+            )
+            if contract is not None:
+                resolved[selector] = contract
+
+        if not resolved:
+            logger.warning(
+                "fetch_futures_bundle resolved no contracts for %r (selectors=%s)",
+                underlying,
+                tuple(selectors),
+            )
+            return {}
+
+        # De-duplicate identical tokens so a shared contract is fetched once.
+        token_to_selectors: Dict[int, List[str]] = defaultdict(list)
+        for selector, contract in resolved.items():
+            token_to_selectors[contract.instrument_token].append(selector)
+
+        # One limiter shared across every contract's fetch (the rate-safety fix).
+        shared_limiter = RequestRateLimiter(self.requests_per_second)
+
+        results: Dict[str, pd.DataFrame] = {}
+        with ThreadPoolExecutor(max_workers=len(token_to_selectors)) as pool:
+            future_to_token = {
+                pool.submit(
+                    self.fetch_historical_data,
+                    token,
+                    start_date,
+                    end_date,
+                    timeframe=timeframe,
+                    chunk_failure_mode=chunk_failure_mode,
+                    rate_limiter=shared_limiter,
+                ): token
+                for token in token_to_selectors
+            }
+            for future in as_completed(future_to_token):
+                token = future_to_token[future]
+                frame = future.result()
+                for selector in token_to_selectors[token]:
+                    results[selector] = frame
+
+        return results
+
     def fetch_historical_data(
         self,
         ticker_token: Union[int, str],
@@ -530,6 +611,7 @@ class ZerodhaDataFetcher:
         end_date: date,
         timeframe: str = "minute",
         chunk_failure_mode: Optional[ChunkFailureMode] = None,
+        rate_limiter: Optional[RequestRateLimiter] = None,
     ) -> pd.DataFrame:
         """
         Fetch historical data from Zerodha API.
@@ -597,6 +679,7 @@ class ZerodhaDataFetcher:
             with RateLimitedThreadPoolExecutor(
                 max_workers=Config.MAX_WORKERS,
                 requests_per_second=self.requests_per_second,
+                rate_limiter=rate_limiter,
             ) as executor:
                 future_to_params = {
                     executor.submit(self._fetch_data_chunk, params): params
