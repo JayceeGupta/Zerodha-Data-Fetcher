@@ -167,5 +167,5 @@ def test_custom_path_csv_without_derivative_columns_degrades_gracefully(tmp_path
     )
     manager = ZerodhaInstrumentManager(instrument_id_path=csv_path)
 
-    assert manager.get_instrument_token("INFY") == 101
+    assert manager.resolve_symbol("INFY") == 101
     assert manager.get_futures_contracts("GOLD", include_expired=True).empty

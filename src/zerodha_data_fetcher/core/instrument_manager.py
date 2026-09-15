@@ -4,7 +4,7 @@ import os
 import logging
 from dataclasses import replace
 from datetime import date
-from typing import List, Optional
+from typing import List, Optional, Union
 
 import pandas as pd
 
@@ -488,7 +488,22 @@ class ZerodhaInstrumentManager:
         return matches.head(1)
 
     def fetch_instrument_ids(self, is_stock: bool = True) -> pd.DataFrame:
-        """Fetch Zerodha instrument IDs for stock or commodity symbols."""
+        """Fetch Zerodha instrument IDs for stock or commodity symbols.
+
+        .. deprecated::
+            This scrip-master-driven bulk lookup is superseded by
+            :meth:`resolve_symbol`, which resolves individual symbols (and
+            tokens) directly without an external ``Scrip Name`` spreadsheet.
+        """
+        import warnings
+
+        warnings.warn(
+            "fetch_instrument_ids() is deprecated. "
+            "Use ZerodhaInstrumentManager().resolve_symbol() to resolve "
+            "individual symbols instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         logger.info(
             "Fetching instrument IDs for %s", "stocks" if is_stock else "commodities"
         )
@@ -533,10 +548,26 @@ class ZerodhaInstrumentManager:
         logger.info("Found %s matching instruments", len(final_df))
         return final_df
 
-    def get_instrument_token(
+    @staticmethod
+    def _first_token(matches: pd.DataFrame) -> Optional[int]:
+        """Return the instrument token of the first row, or ``None`` if empty."""
+        if matches.empty:
+            return None
+        try:
+            return int(matches.iloc[0]["Instrument_Token"])
+        except (KeyError, ValueError, TypeError):
+            return None
+
+    def _lookup_exact_token(
         self, symbol: str, is_stock: bool = True, exchange: Optional[str] = None
     ) -> Optional[int]:
-        """Get instrument token for a specific symbol."""
+        """Exact-match a symbol to an instrument token (no fuzzy fallback).
+
+        This is the historical :meth:`get_instrument_token` behaviour, kept
+        as an internal helper so both the deprecated public method and
+        :meth:`validate_symbol` can share it without emitting deprecation
+        warnings on internal use.
+        """
         try:
             instrument_data = self._load_instrument_data()
 
@@ -552,16 +583,134 @@ class ZerodhaInstrumentManager:
                     instrument_data["Name"].astype(str).str.strip() == normalized_symbol
                 ]
 
-            if result.empty:
+            token = self._first_token(result)
+            if token is None:
                 logger.warning("No instrument token found for symbol: %s", symbol)
                 return None
 
-            token = result.iloc[0]["Instrument_Token"]
             logger.debug("Found instrument token %s for symbol %s", token, symbol)
-            return int(token)
+            return token
         except Exception as exc:
             logger.error("Error getting instrument token for %s: %s", symbol, exc)
             return None
+
+    def get_instrument_token(
+        self, symbol: str, is_stock: bool = True, exchange: Optional[str] = None
+    ) -> Optional[int]:
+        """Get instrument token for a specific symbol.
+
+        .. deprecated::
+            Use :meth:`resolve_symbol`, which handles integer/numeric-string
+            tokens, ``EXCHANGE:SYMBOL`` syntax, and best-effort name matching
+            in a single call.  This method only does an exact ``tradingsymbol``
+            match and requires the caller to know ``is_stock`` up front.
+        """
+        import warnings
+
+        warnings.warn(
+            "get_instrument_token() is deprecated. "
+            "Use ZerodhaInstrumentManager().resolve_symbol() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self._lookup_exact_token(symbol, is_stock=is_stock, exchange=exchange)
+
+    def resolve_symbol(
+        self, query: Union[int, str], exchange: Optional[str] = None
+    ) -> Optional[int]:
+        """Best-effort resolution of a symbol (or token) to an instrument token.
+
+        This is the recommended way to turn user input into a Zerodha
+        instrument token.  Per the Kite instruments spec the reliable unique
+        key is ``exchange`` + ``tradingsymbol`` (numeric tokens are reused
+        across expiries), so resolution is driven by symbol, not by token.
+
+        Resolution order — the first hit wins:
+
+        1. **Integer** *query* → returned as-is (already a token).
+        2. **All-digit string** (e.g. ``"408065"``) → parsed as a token.
+        3. **``EXCHANGE:SYMBOL``** (e.g. ``"BSE:INFY"``) → the prefix sets
+           *exchange* and the remainder is matched as a tradingsymbol.
+        4. **Exact ``tradingsymbol``** match, honouring *exchange* (or the
+           NSE→BSE :attr:`EXCHANGE_PREFERENCE` when none is given).
+        5. **Exact ``name`` (full-name)** match (e.g. ``"Reliance Industries"``).
+        6. **Best-effort substring** match on ``tradingsymbol`` — a last
+           resort, logged so the caller knows the match was fuzzy.
+
+        Args:
+            query: An instrument token (int or numeric string) or a symbol.
+            exchange: Optional exchange filter (e.g. ``"NSE"``, ``"MCX"``).
+
+        Returns:
+            The resolved instrument token, or ``None`` if nothing matched.
+        """
+        # 1. Direct integer token.
+        if isinstance(query, int):
+            return int(query)
+        if query is None:
+            return None
+
+        text = str(query).strip()
+        if not text:
+            return None
+
+        # 2. Numeric string → token.
+        if text.isdigit():
+            return int(text)
+
+        # 3. EXCHANGE:SYMBOL prefix.
+        if ":" in text:
+            prefix, _, remainder = text.partition(":")
+            prefix = prefix.strip()
+            remainder = remainder.strip()
+            if prefix and remainder:
+                exchange = prefix
+                text = remainder
+
+        normalized = text.upper()
+
+        try:
+            data = self._load_instrument_data()
+        except Exception as exc:
+            logger.error("Error resolving symbol %r: %s", query, exc)
+            return None
+
+        # 4. Exact tradingsymbol match (with exchange preference).
+        name_matches = data[data["Name"].astype(str).str.upper() == normalized]
+        token = self._first_token(
+            self._select_preferred_equity_match(name_matches, exchange=exchange)
+        )
+        if token is not None:
+            return token
+
+        # 5. Exact full-name (underlying) match.
+        if "FullName" in data.columns:
+            full_matches = data[data["FullName"].astype(str).str.upper() == normalized]
+            token = self._first_token(
+                self._select_preferred_equity_match(full_matches, exchange=exchange)
+            )
+            if token is not None:
+                return token
+
+        # 6. Best-effort substring match on tradingsymbol.
+        contains = data[
+            data["Name"]
+            .astype(str)
+            .str.contains(normalized, case=False, na=False, regex=False)
+        ]
+        token = self._first_token(
+            self._select_preferred_equity_match(contains, exchange=exchange)
+        )
+        if token is not None:
+            logger.info(
+                "resolve_symbol: best-effort substring match for %r → token %s",
+                query,
+                token,
+            )
+            return token
+
+        logger.warning("resolve_symbol: could not resolve %r to a token", query)
+        return None
 
     def search_symbol(
         self, partial_name: str, limit: int = 10, exchange: Optional[str] = None
@@ -596,8 +745,8 @@ class ZerodhaInstrumentManager:
     def validate_symbol(
         self, symbol: str, is_stock: bool = True, exchange: Optional[str] = None
     ) -> bool:
-        """Validate if a symbol exists in the instrument data."""
-        token = self.get_instrument_token(symbol, is_stock=is_stock, exchange=exchange)
+        """Validate if a symbol exists in the instrument data (exact match)."""
+        token = self._lookup_exact_token(symbol, is_stock=is_stock, exchange=exchange)
         return token is not None
 
 

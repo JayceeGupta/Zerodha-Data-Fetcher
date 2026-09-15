@@ -256,16 +256,10 @@ class ZerodhaDataFetcher:
         if isinstance(ticker_token, str):
             logger.debug("Resolving symbol to instrument token: %s", ticker_token)
 
-            instrument_token = self.instrument_manager.get_instrument_token(
-                ticker_token.upper(),
-                is_stock=True,
-            )
-
-            if instrument_token is None:
-                instrument_token = self.instrument_manager.get_instrument_token(
-                    ticker_token,
-                    is_stock=False,
-                )
+            # resolve_symbol handles exact tradingsymbol/name matches,
+            # EXCHANGE:SYMBOL syntax, numeric-string tokens, and a
+            # best-effort substring fallback in a single call.
+            instrument_token = self.instrument_manager.resolve_symbol(ticker_token)
 
             if instrument_token is None:
                 raise InvalidTickerError(f"Symbol not found: {ticker_token}")

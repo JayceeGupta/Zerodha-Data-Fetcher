@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-09-15
+
+### Added
+- `ZerodhaInstrumentManager.resolve_symbol()` — the recommended way to turn user
+  input into an instrument token. Handles integer/numeric-string tokens,
+  `EXCHANGE:SYMBOL` syntax (e.g. `"BSE:INFY"`), exact `tradingsymbol` and full
+  `name` matches (with NSE→BSE exchange preference), and a best-effort substring
+  fallback. Follows the Kite instruments spec, where `exchange` + `tradingsymbol`
+  is the reliable unique key (numeric tokens are reused across expiries).
+- MCX commodity futures support: `get_futures_contracts()`, near/previous/next and
+  specific-contract resolution, `on_stale` freshness policy,
+  `fetch_futures_historical_data()`, `fetch_futures_bundle()`, and
+  `fetch_futures_continuous()` (raw / ratio / diff back-adjusted stitching).
+
+### Changed
+- **Multi-threaded auth optimization.** `AuthenticationManager` now holds the
+  decrypted token in a process-global in-memory cache keyed by user ID. The hot
+  path returns straight from memory (no keyring read/decrypt per request), and
+  double-checked locking guarantees that exactly one thread runs the login + 2FA
+  flow when a token expires — instead of every concurrent request
+  re-authenticating independently. This removes the request lag seen under
+  concurrency when the cached token was stale.
+- `ZerodhaDataFetcher` symbol resolution now routes through `resolve_symbol()`.
+
+### Deprecated
+- `ZerodhaInstrumentManager.get_instrument_token()` and `fetch_instrument_ids()`
+  are deprecated in favour of `resolve_symbol()`. They continue to work and emit
+  a `DeprecationWarning`.
+
 ## [1.2.0] - 2026-04-28
 
 ### Added

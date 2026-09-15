@@ -174,24 +174,20 @@ def test_resolve_ticker_token_raises_for_invalid_integer_token(
         fetcher._resolve_ticker_token(123)
 
 
-def test_resolve_ticker_token_resolves_stock_symbol(fetcher_factory):
+def test_resolve_ticker_token_resolves_symbol_via_resolve_symbol(fetcher_factory):
     class InstrumentManagerStub:
-        def get_instrument_token(self, symbol, is_stock=True, exchange=None):
-            if symbol == "INFY" and is_stock:
-                return 111
-            return None
+        def resolve_symbol(self, query, exchange=None):
+            return 111 if query == "infy" else None
 
     fetcher = fetcher_factory(instrument_manager=InstrumentManagerStub())
 
     assert fetcher._resolve_ticker_token("infy") == 111
 
 
-def test_resolve_ticker_token_falls_back_to_commodity_lookup(fetcher_factory):
+def test_resolve_ticker_token_resolves_commodity_symbol(fetcher_factory):
     class InstrumentManagerStub:
-        def get_instrument_token(self, symbol, is_stock=True, exchange=None):
-            if symbol == "gold petal" and not is_stock:
-                return 444
-            return None
+        def resolve_symbol(self, query, exchange=None):
+            return 444 if query == "gold petal" else None
 
     fetcher = fetcher_factory(instrument_manager=InstrumentManagerStub())
 
@@ -200,7 +196,7 @@ def test_resolve_ticker_token_falls_back_to_commodity_lookup(fetcher_factory):
 
 def test_resolve_ticker_token_raises_when_symbol_missing(fetcher_factory):
     class InstrumentManagerStub:
-        def get_instrument_token(self, symbol, is_stock=True, exchange=None):
+        def resolve_symbol(self, query, exchange=None):
             return None
 
     fetcher = fetcher_factory(instrument_manager=InstrumentManagerStub())

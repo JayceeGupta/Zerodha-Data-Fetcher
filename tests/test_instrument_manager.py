@@ -1,7 +1,65 @@
 import pandas as pd
+import pytest
 
 from zerodha_data_fetcher.core.instrument_manager import ZerodhaInstrumentManager
 from zerodha_data_fetcher.utils import data_loader as data_loader_module
+
+
+def _as_raw_columns(df):
+    return df.rename(
+        columns={
+            "Instrument_Token": "instrument_token",
+            "Name": "tradingsymbol",
+            "FullName": "name",
+            "Exchange": "exchange",
+        }
+    )
+
+
+@pytest.fixture
+def manager_with_sample(monkeypatch, sample_instrument_df):
+    monkeypatch.setattr(
+        "zerodha_data_fetcher.core.instrument_manager.load_instrument_data",
+        lambda **kwargs: _as_raw_columns(sample_instrument_df),
+    )
+    return ZerodhaInstrumentManager()
+
+
+def test_resolve_symbol_passes_through_integer_token(manager_with_sample):
+    assert manager_with_sample.resolve_symbol(408065) == 408065
+
+
+def test_resolve_symbol_treats_numeric_string_as_token(manager_with_sample):
+    assert manager_with_sample.resolve_symbol("202") == 202
+
+
+def test_resolve_symbol_matches_tradingsymbol_with_nse_preference(manager_with_sample):
+    # INFY exists on both NSE (101) and BSE (202); NSE wins by default.
+    assert manager_with_sample.resolve_symbol("infy") == 101
+
+
+def test_resolve_symbol_honours_exchange_prefix(manager_with_sample):
+    assert manager_with_sample.resolve_symbol("BSE:INFY") == 202
+
+
+def test_resolve_symbol_honours_exchange_argument(manager_with_sample):
+    assert manager_with_sample.resolve_symbol("INFY", exchange="BSE") == 202
+
+
+def test_resolve_symbol_falls_back_to_full_name(manager_with_sample):
+    assert manager_with_sample.resolve_symbol("Reliance Industries") == 303
+
+
+def test_resolve_symbol_best_effort_substring(manager_with_sample):
+    assert manager_with_sample.resolve_symbol("RELIAN") == 303
+
+
+def test_resolve_symbol_returns_none_for_unknown(manager_with_sample):
+    assert manager_with_sample.resolve_symbol("ZZZ-NOT-A-SYMBOL") is None
+
+
+def test_resolve_symbol_returns_none_for_blank(manager_with_sample):
+    assert manager_with_sample.resolve_symbol("   ") is None
 
 
 def test_get_instrument_token_returns_stock_token(monkeypatch, sample_instrument_df):
@@ -18,7 +76,8 @@ def test_get_instrument_token_returns_stock_token(monkeypatch, sample_instrument
     )
     manager = ZerodhaInstrumentManager()
 
-    assert manager.get_instrument_token("INFY") == 101
+    with pytest.warns(DeprecationWarning):
+        assert manager.get_instrument_token("INFY") == 101
 
 
 def test_get_instrument_token_prefers_explicit_exchange(
@@ -37,7 +96,8 @@ def test_get_instrument_token_prefers_explicit_exchange(
     )
     manager = ZerodhaInstrumentManager()
 
-    assert manager.get_instrument_token("INFY", exchange="BSE") == 202
+    with pytest.warns(DeprecationWarning):
+        assert manager.get_instrument_token("INFY", exchange="BSE") == 202
 
 
 def test_get_instrument_token_returns_none_for_unknown_symbol(
@@ -56,7 +116,8 @@ def test_get_instrument_token_returns_none_for_unknown_symbol(
     )
     manager = ZerodhaInstrumentManager()
 
-    assert manager.get_instrument_token("UNKNOWN") is None
+    with pytest.warns(DeprecationWarning):
+        assert manager.get_instrument_token("UNKNOWN") is None
 
 
 def test_search_symbol_returns_matches_with_limit(monkeypatch, sample_instrument_df):
@@ -167,7 +228,8 @@ def test_fetch_instrument_ids_for_equity_uses_loaded_symbols(
         manager, "_load_equity_stocks", lambda: ["INFY", "RELIANCE", "MISSING"]
     )
 
-    results = manager.fetch_instrument_ids(is_stock=True)
+    with pytest.warns(DeprecationWarning):
+        results = manager.fetch_instrument_ids(is_stock=True)
 
     assert results["Name"].tolist() == ["INFY", "RELIANCE"]
 
@@ -205,7 +267,7 @@ def test_instrument_manager_uses_shared_ttl_resolution(
     )
 
     manager = ZerodhaInstrumentManager()
-    manager.get_instrument_token("INFY")
+    manager.resolve_symbol("INFY")
 
     assert manager.cache_ttl_minutes == 77
     assert captured["cache_ttl_minutes"] == 77

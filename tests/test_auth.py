@@ -1,10 +1,20 @@
 import logging
+import threading
+import time as time_module
 from datetime import date
 
 import pytest
 
 from zerodha_data_fetcher.core import auth as auth_module
 from zerodha_data_fetcher.core.token_generator import ZerodhaTokenGenerator
+
+
+@pytest.fixture(autouse=True)
+def _reset_auth_memory_cache():
+    """Keep the process-global in-memory token cache from leaking across tests."""
+    auth_module.AuthenticationManager.clear_memory_cache()
+    yield
+    auth_module.AuthenticationManager.clear_memory_cache()
 
 
 @pytest.fixture
@@ -132,6 +142,90 @@ def test_invalidate_token_deletes_current_user_and_legacy_entries(
     manager.invalidate_token()
 
     assert memory_keyring == {}
+
+
+def test_get_auth_token_serves_second_call_from_in_memory_cache(
+    auth_manager_factory, memory_keyring, monkeypatch
+):
+    manager = auth_manager_factory(user_id="mem_user")
+
+    reads = {"count": 0}
+    patched_get = auth_module.secret_store.get_password
+
+    def counting_get(service, username):
+        reads["count"] += 1
+        return patched_get(service, username)
+
+    monkeypatch.setattr(auth_module.secret_store, "get_password", counting_get)
+    manager.token_generator.generate_auth_token = lambda: "gen-token"
+
+    first = manager.get_auth_token()
+    reads_after_first = reads["count"]
+    second = manager.get_auth_token()
+
+    assert first == "gen-token"
+    assert second == "gen-token"
+    # The second call is served from the in-memory cache without any
+    # further keyring reads (the multi-threaded hot-path optimization).
+    assert reads_after_first > 0
+    assert reads["count"] == reads_after_first
+
+
+def test_concurrent_expired_auth_generates_token_only_once(
+    auth_manager_factory, memory_keyring
+):
+    manager = auth_manager_factory(user_id="race_user")
+
+    calls = {"count": 0}
+    counter_lock = threading.Lock()
+
+    def slow_generate():
+        with counter_lock:
+            calls["count"] += 1
+        # Widen the race window so all threads pile up behind the refresh.
+        time_module.sleep(0.05)
+        return "race-token"
+
+    manager.token_generator.generate_auth_token = slow_generate
+
+    results = []
+    results_lock = threading.Lock()
+
+    def worker():
+        token = manager.get_auth_token()
+        with results_lock:
+            results.append(token)
+
+    threads = [threading.Thread(target=worker) for _ in range(10)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    # Exactly one login flow runs even though ten threads asked at once.
+    assert calls["count"] == 1
+    assert results == ["race-token"] * 10
+
+
+def test_invalidate_token_clears_in_memory_cache(auth_manager_factory, memory_keyring):
+    manager = auth_manager_factory(user_id="inv_user")
+
+    gen_calls = {"count": 0}
+
+    def generate():
+        gen_calls["count"] += 1
+        return f"token-{gen_calls['count']}"
+
+    manager.token_generator.generate_auth_token = generate
+
+    first = manager.get_auth_token()
+    manager.invalidate_token()
+    second = manager.get_auth_token()
+
+    assert first == "token-1"
+    # After invalidation the cached token must not be reused.
+    assert second == "token-2"
+    assert gen_calls["count"] == 2
 
 
 def test_generate_auth_token_does_not_log_sensitive_values(
