@@ -126,21 +126,6 @@ class Config:
         """
         return self.resolve_instrument_cache_ttl_minutes()
 
-    def _required_config(self) -> "list[tuple[str, str]]":
-        """Return ``(value, env-var-name)`` for the mandatory credentials.
-
-        Only the three user credentials are required.  The URLs, keyring
-        keys, and user type all have sensible built-in defaults (see
-        :meth:`__init__`), so they are optional — never treat them as
-        required or authentication rejects otherwise-valid configs whose
-        URLs happen to be blank.
-        """
-        return [
-            (self.ZERODHA_USER_ID, "ZERODHA_USER_ID"),
-            (self.ZERODHA_PASSWORD, "ZERODHA_PASSWORD"),
-            (self.ZERODHA_TOTP_SECRET, "ZERODHA_TOTP_SECRET"),
-        ]
-
     def validate_config(self) -> bool:
         """
         Validate that all required configuration is present.
@@ -157,10 +142,19 @@ class Config:
         """
         Get list of missing **required** configuration variables.
 
+        Only the three user credentials are required; the URLs, keyring keys,
+        and user type all default internally (see :meth:`__init__`), so blank
+        values there must not be reported as missing.
+
         Returns:
             list: Names of any missing credential env vars, in a stable order.
         """
-        return [name for value, name in self._required_config() if not value]
+        required = [
+            (self.ZERODHA_USER_ID, "ZERODHA_USER_ID"),
+            (self.ZERODHA_PASSWORD, "ZERODHA_PASSWORD"),
+            (self.ZERODHA_TOTP_SECRET, "ZERODHA_TOTP_SECRET"),
+        ]
+        return [name for value, name in required if not value]
 
     def to_dict(self) -> Dict[str, str]:
         """

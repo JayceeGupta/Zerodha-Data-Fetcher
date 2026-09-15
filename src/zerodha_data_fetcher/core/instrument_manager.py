@@ -423,14 +423,30 @@ class ZerodhaInstrumentManager:
         except (KeyError, ValueError, TypeError):
             return None
 
+    # Derivative instrument types keyed off the Kite ``instrument_type``
+    # column. A single underlying (e.g. GOLD) maps to many of these, so they
+    # must be excluded from name/substring matching — otherwise "GOLD" could
+    # silently resolve to an arbitrary futures expiry. Use a specific
+    # contract's tradingsymbol, or resolve_futures_contract(), instead.
+    _DERIVATIVE_TYPES = ("FUT", "CE", "PE")
+
+    def _cash_only(self, data: pd.DataFrame) -> pd.DataFrame:
+        """Return the non-derivative (cash/equity/index) rows of *data*."""
+        if "InstrumentType" not in data.columns:
+            return data
+        is_derivative = (
+            data["InstrumentType"].astype(str).str.upper().isin(self._DERIVATIVE_TYPES)
+        )
+        return data[~is_derivative]
+
     def _match_exact(
         self, data: pd.DataFrame, normalized: str, exchange: Optional[str]
     ) -> Optional[int]:
         """Exact-match an upper-cased symbol to a token (no fuzzy fallback).
 
-        Tries ``tradingsymbol`` first, then the full ``name``, applying the
-        exchange filter / NSE→BSE preference in both cases.  Shared by
-        :meth:`resolve_symbol` and :meth:`validate_symbol`.
+        Tries ``tradingsymbol`` first (unambiguous per contract, so derivatives
+        are allowed here), then the full ``name`` restricted to cash instruments.
+        Shared by :meth:`resolve_symbol` and :meth:`validate_symbol`.
         """
         name_matches = data[data["Name"].astype(str).str.upper() == normalized]
         token = self._first_token(
@@ -440,7 +456,8 @@ class ZerodhaInstrumentManager:
             return token
 
         if "FullName" in data.columns:
-            full_matches = data[data["FullName"].astype(str).str.upper() == normalized]
+            cash = self._cash_only(data)
+            full_matches = cash[cash["FullName"].astype(str).str.upper() == normalized]
             token = self._first_token(
                 self._select_preferred_equity_match(full_matches, exchange=exchange)
             )
@@ -466,10 +483,16 @@ class ZerodhaInstrumentManager:
         3. **``EXCHANGE:SYMBOL``** (e.g. ``"BSE:INFY"``) → the prefix sets
            *exchange* and the remainder is matched as a tradingsymbol.
         4. **Exact ``tradingsymbol``** match, honouring *exchange* (or the
-           NSE→BSE :attr:`EXCHANGE_PREFERENCE` when none is given).
-        5. **Exact ``name`` (full-name)** match (e.g. ``"Reliance Industries"``).
-        6. **Best-effort substring** match on ``tradingsymbol`` — a last
-           resort, logged so the caller knows the match was fuzzy.
+           NSE→BSE :attr:`EXCHANGE_PREFERENCE` when none is given). A specific
+           derivative contract (e.g. ``"GOLD24AUGFUT"``) resolves here.
+        5. **Exact ``name`` (full-name)** match (e.g. ``"Reliance Industries"``),
+           **cash instruments only**.
+        6. **Best-effort substring** match on ``tradingsymbol`` (cash only) — a
+           last resort, logged so the caller knows the match was fuzzy.
+
+        Full-name and substring matching deliberately skip derivatives so an
+        underlying like ``"GOLD"`` never silently resolves to an arbitrary
+        futures expiry — use its tradingsymbol or ``resolve_futures_contract``.
 
         Args:
             query: An instrument token (int or numeric string) or a symbol.
@@ -514,9 +537,11 @@ class ZerodhaInstrumentManager:
         if token is not None:
             return token
 
-        # 6. Best-effort substring match on tradingsymbol.
-        contains = data[
-            data["Name"]
+        # 6. Best-effort substring match on tradingsymbol, cash instruments
+        #    only (never silently return a derivative from a fuzzy match).
+        cash = self._cash_only(data)
+        contains = cash[
+            cash["Name"]
             .astype(str)
             .str.contains(normalized, case=False, na=False, regex=False)
         ]

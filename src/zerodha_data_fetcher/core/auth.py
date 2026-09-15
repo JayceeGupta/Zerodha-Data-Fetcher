@@ -292,17 +292,25 @@ class AuthenticationManager:
             raise AuthenticationError(f"Token generation failed: {str(e)}")
 
     def invalidate_token(self) -> None:
-        """Invalidate the current stored token."""
+        """Invalidate the current stored token (in-memory and persisted).
+
+        The whole invalidation runs under :attr:`_CACHE_LOCK` so a concurrent
+        :meth:`get_auth_token` cannot slip in between the memory eviction and
+        the keyring deletion, reload the still-persisted token, and republish
+        it — which would defeat the invalidation.
+        """
         try:
             with type(self)._CACHE_LOCK:
                 type(self)._MEMORY_CACHE.pop(self._current_user_id, None)
-            self._delete_password_best_effort(self._scoped_account_name("token"))
-            self._delete_password_best_effort(self._scoped_account_name("date"))
-            self._delete_password_best_effort(self._scoped_account_name("timestamp"))
-            self._delete_password_best_effort("token")
-            self._delete_password_best_effort("date")
-            self._delete_password_best_effort("timestamp")
-            self._delete_password_best_effort("userid")
+                self._delete_password_best_effort(self._scoped_account_name("token"))
+                self._delete_password_best_effort(self._scoped_account_name("date"))
+                self._delete_password_best_effort(
+                    self._scoped_account_name("timestamp")
+                )
+                self._delete_password_best_effort("token")
+                self._delete_password_best_effort("date")
+                self._delete_password_best_effort("timestamp")
+                self._delete_password_best_effort("userid")
             logger.info("Token invalidated successfully for current user")
         except Exception as e:
             logger.warning(f"Failed to invalidate token: {str(e)}")

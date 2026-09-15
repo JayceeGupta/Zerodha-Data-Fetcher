@@ -25,6 +25,30 @@ def manager_with_sample(monkeypatch, sample_instrument_df):
     return ZerodhaInstrumentManager()
 
 
+@pytest.fixture
+def manager_with_mcx(monkeypatch, sample_mcx_futures_df):
+    monkeypatch.setattr(
+        "zerodha_data_fetcher.core.instrument_manager.load_instrument_data",
+        lambda **kwargs: sample_mcx_futures_df,
+    )
+    return ZerodhaInstrumentManager()
+
+
+def test_resolve_symbol_exact_futures_tradingsymbol(manager_with_mcx):
+    # A specific contract's tradingsymbol is unambiguous and must resolve.
+    assert manager_with_mcx.resolve_symbol("GOLD24AUGFUT") == 111
+
+
+def test_resolve_symbol_underlying_does_not_pick_a_futures_expiry(manager_with_mcx):
+    # "GOLD" is only a futures underlying here; it must NOT silently resolve
+    # to an arbitrary expiry token (111-114) via full-name/substring matching.
+    assert manager_with_mcx.resolve_symbol("GOLD") is None
+
+
+def test_validate_symbol_false_for_futures_underlying(manager_with_mcx):
+    assert manager_with_mcx.validate_symbol("GOLD") is False
+
+
 def test_resolve_symbol_passes_through_integer_token(manager_with_sample):
     assert manager_with_sample.resolve_symbol(408065) == 408065
 

@@ -8,7 +8,7 @@ This package provides tools for:
 - Parallel data fetching with error handling
 """
 
-__version__ = "1.3.0"
+__version__ = "2.0.0"
 __author__ = "Jayam Gupta"
 __email__ = "guptajayam47@gmail.com"
 __description__ = (

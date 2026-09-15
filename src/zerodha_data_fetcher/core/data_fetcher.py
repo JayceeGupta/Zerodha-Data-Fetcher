@@ -126,19 +126,16 @@ class ZerodhaDataFetcher:
 
     @staticmethod
     def _format_date_range_label(start_date: date, end_date: date) -> str:
-        """Format a human-readable date range label."""
+        """Format a human-readable date range label (chunk params are (start, end, ...))."""
         return f"{start_date} to {end_date}"
-
-    def _format_params_range_label(self, params: Tuple) -> str:
-        """Format a date range label from chunk parameters."""
-        return self._format_date_range_label(params[0], params[1])
 
     def _summarize_failed_ranges(
         self, failed_chunks: List[Tuple[Tuple, Exception]]
     ) -> str:
         """Return a compact range summary for failed chunk parameters."""
         return ", ".join(
-            self._format_params_range_label(params) for params, _ in failed_chunks
+            self._format_date_range_label(params[0], params[1])
+            for params, _ in failed_chunks
         )
 
     def _extract_error_payload(self, error_message: str) -> Optional[Dict[str, Any]]:
@@ -247,6 +244,11 @@ class ZerodhaDataFetcher:
         Raises:
             InvalidTickerError: If ticker token is invalid.
         """
+        # A numeric string is the same thing as an integer token, so route it
+        # through the same validated path — 123 and "123" behave identically.
+        if isinstance(ticker_token, str) and ticker_token.strip().isdigit():
+            ticker_token = int(ticker_token.strip())
+
         if isinstance(ticker_token, int):
             logger.debug("Validating integer ticker token: %s", ticker_token)
             if not self._validate_ticker_token(ticker_token):
@@ -257,8 +259,7 @@ class ZerodhaDataFetcher:
             logger.debug("Resolving symbol to instrument token: %s", ticker_token)
 
             # resolve_symbol handles exact tradingsymbol/name matches,
-            # EXCHANGE:SYMBOL syntax, numeric-string tokens, and a
-            # best-effort substring fallback in a single call.
+            # EXCHANGE:SYMBOL syntax, and a best-effort substring fallback.
             instrument_token = self.instrument_manager.resolve_symbol(ticker_token)
 
             if instrument_token is None:
@@ -814,7 +815,7 @@ class ZerodhaDataFetcher:
                     summary = (
                         f"Historical fetch failed in strict mode after "
                         f"{len(failed_chunks)} chunk failure(s); first failed range "
-                        f"{self._format_params_range_label(first_failed_params)}: {first_error}"
+                        f"{self._format_date_range_label(first_failed_params[0], first_failed_params[1])}: {first_error}"
                     )
                     if cancelled_pending_chunks:
                         summary += (
@@ -835,7 +836,7 @@ class ZerodhaDataFetcher:
                         "Historical fetch failed: all "
                         f"{len(failed_chunks)} chunk(s) failed. Failed ranges: "
                         f"{self._summarize_failed_ranges(failed_chunks)}. First error from "
-                        f"{self._format_params_range_label(first_failed_params)}: {first_error}"
+                        f"{self._format_date_range_label(first_failed_params[0], first_failed_params[1])}: {first_error}"
                     )
 
             if not all_data:

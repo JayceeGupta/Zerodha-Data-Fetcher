@@ -174,6 +174,26 @@ def test_resolve_ticker_token_raises_for_invalid_integer_token(
         fetcher._resolve_ticker_token(123)
 
 
+def test_resolve_ticker_token_validates_numeric_string_like_int(
+    fetcher_factory, monkeypatch
+):
+    fetcher = fetcher_factory()
+    monkeypatch.setattr(fetcher, "_validate_ticker_token", lambda token: token == 123)
+
+    # "123" is the same token as 123 and must go through the same validation.
+    assert fetcher._resolve_ticker_token("123") == 123
+
+
+def test_resolve_ticker_token_raises_for_invalid_numeric_string(
+    fetcher_factory, monkeypatch
+):
+    fetcher = fetcher_factory()
+    monkeypatch.setattr(fetcher, "_validate_ticker_token", lambda _token: False)
+
+    with pytest.raises(InvalidTickerError, match="Invalid ticker token: 123"):
+        fetcher._resolve_ticker_token("123")
+
+
 def test_resolve_ticker_token_resolves_symbol_via_resolve_symbol(fetcher_factory):
     class InstrumentManagerStub:
         def resolve_symbol(self, query, exchange=None):
