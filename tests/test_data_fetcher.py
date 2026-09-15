@@ -1153,28 +1153,3 @@ def test_search_symbols_returns_empty_dataframe_on_exception(fetcher_factory):
     result = fetcher.search_symbols("INF")
 
     assert result.empty is True
-
-
-def test_fetchDataZerodha_constructs_fetcher_and_delegates_call(monkeypatch):
-    captured = {}
-
-    class FakeFetcher:
-        def __init__(self, requests_per_second):
-            captured["requests_per_second"] = requests_per_second
-
-        def fetch_historical_data(self, ticker_token, start_date, end_date):
-            captured["call"] = (ticker_token, start_date, end_date)
-            return "result"
-
-    monkeypatch.setattr(data_fetcher_module, "ZerodhaDataFetcher", FakeFetcher)
-
-    result = data_fetcher_module.fetchDataZerodha(
-        ticker_token="INFY",
-        startDate=date(2024, 1, 1),
-        endDate=date(2024, 1, 2),
-        reqPerSec=5,
-    )
-
-    assert result == "result"
-    assert captured["requests_per_second"] == 5
-    assert captured["call"] == ("INFY", date(2024, 1, 1), date(2024, 1, 2))

@@ -255,10 +255,7 @@ Cache location:
   instruments spec, `exchange` + `tradingsymbol` is the reliable key — numeric tokens
   are reused across expiries — so resolution is symbol-driven.
 - `search_symbol(partial_name, limit=10, exchange=None)` — DataFrame of matches.
-- `validate_symbol(symbol, is_stock=True, exchange=None)` — exact-match existence check.
-
-> **Deprecated:** `get_instrument_token()` and `fetch_instrument_ids()` still work but
-> emit a `DeprecationWarning`; use `resolve_symbol()` instead.
+- `validate_symbol(symbol, exchange=None)` — exact-match existence check.
 
 Authentication is optimized for multi-threaded use: the decrypted token is cached in
 memory (process-global, per user ID), so concurrent fetches reuse it without repeated

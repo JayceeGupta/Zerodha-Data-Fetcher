@@ -4,7 +4,7 @@ import os
 import logging
 from dataclasses import replace
 from datetime import date
-from typing import List, Optional, Union
+from typing import Optional, Union
 
 import pandas as pd
 
@@ -43,8 +43,6 @@ class ZerodhaInstrumentManager:
 
     def __init__(
         self,
-        equity_scrip_path: Optional[str] = None,
-        commodity_scrip_path: Optional[str] = None,
         instrument_id_path: Optional[str] = None,
         cache_ttl_minutes: Optional[int] = None,
         on_stale: str = "warn",
@@ -57,11 +55,6 @@ class ZerodhaInstrumentManager:
         subsequent lookups.
 
         Args:
-            equity_scrip_path: Path to an Excel file containing equity
-                scrip names (column ``'Scrip Name'``).  Optional — only
-                needed when using :meth:`fetch_instrument_ids`.
-            commodity_scrip_path: Path to an Excel file containing
-                commodity scrip names (same column layout).  Optional.
             instrument_id_path: Path to a custom CSV with Zerodha
                 instrument data.  When omitted, the library uses a
                 cached/bundled copy of the official Kite instruments CSV.
@@ -70,8 +63,6 @@ class ZerodhaInstrumentManager:
                 Defaults to ``ZERODHA_INSTRUMENT_CACHE_TTL`` env var,
                 then 1440 (24 hours).
         """
-        self.equity_scrip_path = equity_scrip_path
-        self.commodity_scrip_path = commodity_scrip_path
         self.instrument_id_path = instrument_id_path
         self.on_stale = self._validate_on_stale(on_stale)
 
@@ -81,8 +72,6 @@ class ZerodhaInstrumentManager:
         else:
             self.cache_ttl_minutes = Config.resolve_instrument_cache_ttl_minutes()
 
-        self._equity_stocks: Optional[List[str]] = None
-        self._commodities: Optional[List[str]] = None
         self._instrument_data: Optional[pd.DataFrame] = None
 
         logger.info(
@@ -95,61 +84,6 @@ class ZerodhaInstrumentManager:
             )
         else:
             logger.info("Using cached/bundled instrument data")
-
-    def _load_equity_stocks(self) -> List[str]:
-        """Load equity stock symbols from an NSE/BSE scrip master Excel file.
-
-        Reads the ``'Scrip Name'`` column — the standard column header
-        used by exchange-provided scrip master spreadsheets.  The result
-        is cached in ``_equity_stocks`` so the file is read at most once.
-        """
-        if self._equity_stocks is None:
-            if not self.equity_scrip_path or not os.path.exists(self.equity_scrip_path):
-                logger.warning(
-                    "Equity scrip list path not provided or file doesn't exist"
-                )
-                return []
-
-            try:
-                df = pd.read_excel(self.equity_scrip_path)
-                self._equity_stocks = df["Scrip Name"].to_list()
-                logger.debug(
-                    "Loaded %s stocks from equity scrip list", len(self._equity_stocks)
-                )
-            except Exception as exc:
-                logger.error("Failed to load equity scrip list: %s", exc)
-                self._equity_stocks = []
-
-        return self._equity_stocks
-
-    def _load_commodities(self) -> List[str]:
-        """Load commodity symbols from an exchange scrip master Excel file.
-
-        Uses the same ``'Scrip Name'`` column as equity scrip masters.
-        The result is cached in ``_commodities`` so the file is read at
-        most once.
-        """
-        if self._commodities is None:
-            if not self.commodity_scrip_path or not os.path.exists(
-                self.commodity_scrip_path
-            ):
-                logger.warning(
-                    "Commodity scrip list path not provided or file doesn't exist"
-                )
-                return []
-
-            try:
-                df = pd.read_excel(self.commodity_scrip_path)
-                self._commodities = df["Scrip Name"].to_list()
-                logger.debug(
-                    "Loaded %s commodities from commodity scrip list",
-                    len(self._commodities),
-                )
-            except Exception as exc:
-                logger.error("Failed to load commodity scrip list: %s", exc)
-                self._commodities = []
-
-        return self._commodities
 
     def _load_instrument_data(self) -> pd.DataFrame:
         """Load Zerodha instrument ID data from CSV file."""
@@ -453,14 +387,6 @@ class ZerodhaInstrumentManager:
         )
         return select_specific_contract(contracts, year, month)
 
-    def _normalize_commodity_symbol(self, symbol: str) -> Optional[str]:
-        """Normalize commodity lookup strings into the bundled data format."""
-        parts = [part for part in str(symbol).strip().split() if part]
-        if len(parts) < 2:
-            logger.warning("Malformed commodity symbol: %s", symbol)
-            return None
-        return f"{parts[0]} {parts[-1].replace('-', ' ')}"
-
     def _select_preferred_equity_match(
         self, matches: pd.DataFrame, exchange: Optional[str] = None
     ) -> pd.DataFrame:
@@ -487,67 +413,6 @@ class ZerodhaInstrumentManager:
 
         return matches.head(1)
 
-    def fetch_instrument_ids(self, is_stock: bool = True) -> pd.DataFrame:
-        """Fetch Zerodha instrument IDs for stock or commodity symbols.
-
-        .. deprecated::
-            This scrip-master-driven bulk lookup is superseded by
-            :meth:`resolve_symbol`, which resolves individual symbols (and
-            tokens) directly without an external ``Scrip Name`` spreadsheet.
-        """
-        import warnings
-
-        warnings.warn(
-            "fetch_instrument_ids() is deprecated. "
-            "Use ZerodhaInstrumentManager().resolve_symbol() to resolve "
-            "individual symbols instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        logger.info(
-            "Fetching instrument IDs for %s", "stocks" if is_stock else "commodities"
-        )
-
-        instrument_data = self._load_instrument_data()
-        rows = []
-
-        if is_stock:
-            for symbol in self._load_equity_stocks():
-                normalized_symbol = str(symbol).strip().upper()
-                matches = instrument_data[instrument_data["Name"] == normalized_symbol]
-                result = self._select_preferred_equity_match(matches)
-                if result.empty:
-                    logger.warning(
-                        "No matching instrument ID found for stock: %s", symbol
-                    )
-                else:
-                    rows.append(result)
-        else:
-            for symbol in self._load_commodities():
-                normalized_symbol = self._normalize_commodity_symbol(str(symbol))
-                if not normalized_symbol:
-                    continue
-                result = instrument_data[
-                    instrument_data["Name"].astype(str).str.strip() == normalized_symbol
-                ]
-                if result.empty:
-                    logger.warning(
-                        "No matching instrument ID found for commodity: %s",
-                        normalized_symbol,
-                    )
-                else:
-                    rows.append(result)
-
-        final_df = (
-            pd.concat(rows, ignore_index=True)
-            if rows
-            else pd.DataFrame(columns=instrument_data.columns)
-        )
-        if "Name" in final_df.columns:
-            final_df["Name"] = final_df["Name"].astype(str).str.strip()
-        logger.info("Found %s matching instruments", len(final_df))
-        return final_df
-
     @staticmethod
     def _first_token(matches: pd.DataFrame) -> Optional[int]:
         """Return the instrument token of the first row, or ``None`` if empty."""
@@ -558,62 +423,31 @@ class ZerodhaInstrumentManager:
         except (KeyError, ValueError, TypeError):
             return None
 
-    def _lookup_exact_token(
-        self, symbol: str, is_stock: bool = True, exchange: Optional[str] = None
+    def _match_exact(
+        self, data: pd.DataFrame, normalized: str, exchange: Optional[str]
     ) -> Optional[int]:
-        """Exact-match a symbol to an instrument token (no fuzzy fallback).
+        """Exact-match an upper-cased symbol to a token (no fuzzy fallback).
 
-        This is the historical :meth:`get_instrument_token` behaviour, kept
-        as an internal helper so both the deprecated public method and
-        :meth:`validate_symbol` can share it without emitting deprecation
-        warnings on internal use.
+        Tries ``tradingsymbol`` first, then the full ``name``, applying the
+        exchange filter / NSE→BSE preference in both cases.  Shared by
+        :meth:`resolve_symbol` and :meth:`validate_symbol`.
         """
-        try:
-            instrument_data = self._load_instrument_data()
-
-            if is_stock:
-                normalized_symbol = str(symbol).strip().upper()
-                matches = instrument_data[instrument_data["Name"] == normalized_symbol]
-                result = self._select_preferred_equity_match(matches, exchange=exchange)
-            else:
-                normalized_symbol = self._normalize_commodity_symbol(symbol)
-                if not normalized_symbol:
-                    return None
-                result = instrument_data[
-                    instrument_data["Name"].astype(str).str.strip() == normalized_symbol
-                ]
-
-            token = self._first_token(result)
-            if token is None:
-                logger.warning("No instrument token found for symbol: %s", symbol)
-                return None
-
-            logger.debug("Found instrument token %s for symbol %s", token, symbol)
-            return token
-        except Exception as exc:
-            logger.error("Error getting instrument token for %s: %s", symbol, exc)
-            return None
-
-    def get_instrument_token(
-        self, symbol: str, is_stock: bool = True, exchange: Optional[str] = None
-    ) -> Optional[int]:
-        """Get instrument token for a specific symbol.
-
-        .. deprecated::
-            Use :meth:`resolve_symbol`, which handles integer/numeric-string
-            tokens, ``EXCHANGE:SYMBOL`` syntax, and best-effort name matching
-            in a single call.  This method only does an exact ``tradingsymbol``
-            match and requires the caller to know ``is_stock`` up front.
-        """
-        import warnings
-
-        warnings.warn(
-            "get_instrument_token() is deprecated. "
-            "Use ZerodhaInstrumentManager().resolve_symbol() instead.",
-            DeprecationWarning,
-            stacklevel=2,
+        name_matches = data[data["Name"].astype(str).str.upper() == normalized]
+        token = self._first_token(
+            self._select_preferred_equity_match(name_matches, exchange=exchange)
         )
-        return self._lookup_exact_token(symbol, is_stock=is_stock, exchange=exchange)
+        if token is not None:
+            return token
+
+        if "FullName" in data.columns:
+            full_matches = data[data["FullName"].astype(str).str.upper() == normalized]
+            token = self._first_token(
+                self._select_preferred_equity_match(full_matches, exchange=exchange)
+            )
+            if token is not None:
+                return token
+
+        return None
 
     def resolve_symbol(
         self, query: Union[int, str], exchange: Optional[str] = None
@@ -675,22 +509,10 @@ class ZerodhaInstrumentManager:
             logger.error("Error resolving symbol %r: %s", query, exc)
             return None
 
-        # 4. Exact tradingsymbol match (with exchange preference).
-        name_matches = data[data["Name"].astype(str).str.upper() == normalized]
-        token = self._first_token(
-            self._select_preferred_equity_match(name_matches, exchange=exchange)
-        )
+        # 4/5. Exact tradingsymbol, then exact full-name (both exchange-aware).
+        token = self._match_exact(data, normalized, exchange)
         if token is not None:
             return token
-
-        # 5. Exact full-name (underlying) match.
-        if "FullName" in data.columns:
-            full_matches = data[data["FullName"].astype(str).str.upper() == normalized]
-            token = self._first_token(
-                self._select_preferred_equity_match(full_matches, exchange=exchange)
-            )
-            if token is not None:
-                return token
 
         # 6. Best-effort substring match on tradingsymbol.
         contains = data[
@@ -742,54 +564,13 @@ class ZerodhaInstrumentManager:
             logger.error("Error searching for symbol '%s': %s", partial_name, exc)
             return pd.DataFrame()
 
-    def validate_symbol(
-        self, symbol: str, is_stock: bool = True, exchange: Optional[str] = None
-    ) -> bool:
-        """Validate if a symbol exists in the instrument data (exact match)."""
-        token = self._lookup_exact_token(symbol, is_stock=is_stock, exchange=exchange)
-        return token is not None
-
-
-# ---------------------------------------------------------------------------
-# Legacy API — preserved for backward compatibility only.
-# New code should use ZerodhaInstrumentManager directly.
-# ---------------------------------------------------------------------------
-
-
-def fetchZerodhaID(
-    stock: bool,
-    equity_scrip_path: Optional[str] = None,
-    commodity_scrip_path: Optional[str] = None,
-    instrument_id_path: Optional[str] = None,
-) -> pd.DataFrame:
-    """Fetch instrument IDs for a list of symbols.
-
-    .. deprecated::
-        Use :class:`ZerodhaInstrumentManager` and its
-        :meth:`~ZerodhaInstrumentManager.fetch_instrument_ids` method
-        instead.  This function is retained only so that existing callers
-        continue to work without changes.
-
-    Args:
-        stock: ``True`` for equity stocks, ``False`` for commodities.
-        equity_scrip_path: Path to the equity scrip master Excel file.
-        commodity_scrip_path: Path to the commodity scrip master Excel file.
-        instrument_id_path: Path to a custom Zerodha instruments CSV.
-
-    Returns:
-        pd.DataFrame: Matching instrument data.
-    """
-    import warnings
-
-    warnings.warn(
-        "fetchZerodhaID() is deprecated. "
-        "Use ZerodhaInstrumentManager().fetch_instrument_ids() instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    manager = ZerodhaInstrumentManager(
-        equity_scrip_path=equity_scrip_path,
-        commodity_scrip_path=commodity_scrip_path,
-        instrument_id_path=instrument_id_path,
-    )
-    return manager.fetch_instrument_ids(is_stock=stock)
+    def validate_symbol(self, symbol: str, exchange: Optional[str] = None) -> bool:
+        """Return ``True`` if *symbol* has an exact tradingsymbol/name match."""
+        try:
+            data = self._load_instrument_data()
+        except Exception as exc:
+            logger.error("Error validating symbol %r: %s", symbol, exc)
+            return False
+        return (
+            self._match_exact(data, str(symbol).strip().upper(), exchange) is not None
+        )

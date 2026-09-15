@@ -19,8 +19,8 @@ __url__ = "https://github.com/JayceeGupta/Zerodha-Data-Fetcher"
 # Import main classes and functions for easy access
 try:
     # Core functionality
-    from .core.data_fetcher import ZerodhaDataFetcher, fetchDataZerodha
-    from .core.instrument_manager import ZerodhaInstrumentManager, fetchZerodhaID
+    from .core.data_fetcher import ZerodhaDataFetcher
+    from .core.instrument_manager import ZerodhaInstrumentManager
     from .core.contract_selector import ResolvedContract
     from .core.continuous import stitch_segments
     from .core.auth import AuthenticationManager
@@ -47,9 +47,6 @@ try:
         "stitch_segments",
         "AuthenticationManager",
         "Config",
-        # Backward compatibility functions
-        "fetchDataZerodha",
-        "fetchZerodhaID",
         # Instrument cache helpers
         "refresh_instruments",
         # Utilities

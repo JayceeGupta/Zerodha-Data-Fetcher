@@ -28,11 +28,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   re-authenticating independently. This removes the request lag seen under
   concurrency when the cached token was stale.
 - `ZerodhaDataFetcher` symbol resolution now routes through `resolve_symbol()`.
+- `validate_symbol()` signature simplified to `(symbol, exchange=None)` (the
+  meaningless `is_stock` flag was dropped).
 
-### Deprecated
-- `ZerodhaInstrumentManager.get_instrument_token()` and `fetch_instrument_ids()`
-  are deprecated in favour of `resolve_symbol()`. They continue to work and emit
-  a `DeprecationWarning`.
+### Removed
+- **Breaking:** retired the legacy backward-compatibility API and the
+  scrip-master lookup path that only served it: `get_instrument_token()`,
+  `fetch_instrument_ids()`, the `equity_scrip_path`/`commodity_scrip_path`
+  constructor arguments, and the top-level `fetchDataZerodha`, `fetchZerodhaID`,
+  `getEncAuthToken`, and `get_TOTP` functions. Use `ZerodhaDataFetcher`,
+  `ZerodhaInstrumentManager.resolve_symbol()`, and `ZerodhaTokenGenerator`
+  directly instead.
 
 ## [1.2.0] - 2026-04-28
 

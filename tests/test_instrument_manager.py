@@ -62,64 +62,6 @@ def test_resolve_symbol_returns_none_for_blank(manager_with_sample):
     assert manager_with_sample.resolve_symbol("   ") is None
 
 
-def test_get_instrument_token_returns_stock_token(monkeypatch, sample_instrument_df):
-    monkeypatch.setattr(
-        "zerodha_data_fetcher.core.instrument_manager.load_instrument_data",
-        lambda **kwargs: sample_instrument_df.rename(
-            columns={
-                "Instrument_Token": "instrument_token",
-                "Name": "tradingsymbol",
-                "FullName": "name",
-                "Exchange": "exchange",
-            }
-        ),
-    )
-    manager = ZerodhaInstrumentManager()
-
-    with pytest.warns(DeprecationWarning):
-        assert manager.get_instrument_token("INFY") == 101
-
-
-def test_get_instrument_token_prefers_explicit_exchange(
-    monkeypatch, sample_instrument_df
-):
-    monkeypatch.setattr(
-        "zerodha_data_fetcher.core.instrument_manager.load_instrument_data",
-        lambda **kwargs: sample_instrument_df.rename(
-            columns={
-                "Instrument_Token": "instrument_token",
-                "Name": "tradingsymbol",
-                "FullName": "name",
-                "Exchange": "exchange",
-            }
-        ),
-    )
-    manager = ZerodhaInstrumentManager()
-
-    with pytest.warns(DeprecationWarning):
-        assert manager.get_instrument_token("INFY", exchange="BSE") == 202
-
-
-def test_get_instrument_token_returns_none_for_unknown_symbol(
-    monkeypatch, sample_instrument_df
-):
-    monkeypatch.setattr(
-        "zerodha_data_fetcher.core.instrument_manager.load_instrument_data",
-        lambda **kwargs: sample_instrument_df.rename(
-            columns={
-                "Instrument_Token": "instrument_token",
-                "Name": "tradingsymbol",
-                "FullName": "name",
-                "Exchange": "exchange",
-            }
-        ),
-    )
-    manager = ZerodhaInstrumentManager()
-
-    with pytest.warns(DeprecationWarning):
-        assert manager.get_instrument_token("UNKNOWN") is None
-
-
 def test_search_symbol_returns_matches_with_limit(monkeypatch, sample_instrument_df):
     monkeypatch.setattr(
         "zerodha_data_fetcher.core.instrument_manager.load_instrument_data",
@@ -207,37 +149,6 @@ def test_validate_symbol_false_for_missing_symbol(monkeypatch, sample_instrument
     manager = ZerodhaInstrumentManager()
 
     assert manager.validate_symbol("MISSING") is False
-
-
-def test_fetch_instrument_ids_for_equity_uses_loaded_symbols(
-    monkeypatch, sample_instrument_df
-):
-    monkeypatch.setattr(
-        "zerodha_data_fetcher.core.instrument_manager.load_instrument_data",
-        lambda **kwargs: sample_instrument_df.rename(
-            columns={
-                "Instrument_Token": "instrument_token",
-                "Name": "tradingsymbol",
-                "FullName": "name",
-                "Exchange": "exchange",
-            }
-        ),
-    )
-    manager = ZerodhaInstrumentManager()
-    monkeypatch.setattr(
-        manager, "_load_equity_stocks", lambda: ["INFY", "RELIANCE", "MISSING"]
-    )
-
-    with pytest.warns(DeprecationWarning):
-        results = manager.fetch_instrument_ids(is_stock=True)
-
-    assert results["Name"].tolist() == ["INFY", "RELIANCE"]
-
-
-def test_normalize_commodity_symbol_basic_case():
-    manager = ZerodhaInstrumentManager()
-
-    assert manager._normalize_commodity_symbol("GOLD petal") == "GOLD petal"
 
 
 def test_instrument_manager_uses_shared_ttl_resolution(
