@@ -33,7 +33,9 @@ tests/                   pytest suite — fully mocked, no network/keyring acces
 
 ## Public API
 
-Exported from `zerodha_data_fetcher` (`__init__.py`): `ZerodhaDataFetcher`, `ZerodhaInstrumentManager`, `AuthenticationManager`, `RateLimitedThreadPoolExecutor`, `Config`, `setup_logging`, `refresh_instruments`, and the exceptions `ZerodhaAPIError`, `AuthenticationError`, `InvalidTickerError`, `DataFetchError`, `TokenExpiredError`. `fetchDataZerodha` and `fetchZerodhaID` are retained as backward-compatibility aliases.
+Exported from `zerodha_data_fetcher` (`__init__.py`): `ZerodhaDataFetcher`, `ZerodhaInstrumentManager`, `AuthenticationManager`, `RateLimitedThreadPoolExecutor`, `Config`, `setup_logging`, `refresh_instruments`, and the exceptions `ZerodhaAPIError`, `AuthenticationError`, `InvalidTickerError`, `DataFetchError`, `TokenExpiredError`.
+
+To resolve a symbol to an instrument token, use `ZerodhaInstrumentManager.resolve_symbol()` (handles int/numeric-string tokens, `EXCHANGE:SYMBOL`, exact tradingsymbol/name, and a best-effort substring fallback). The old scrip-master helpers (`get_instrument_token`, `fetch_instrument_ids`) and the legacy top-level aliases (`fetchDataZerodha`, `fetchZerodhaID`, `getEncAuthToken`, `get_TOTP`) were removed in 2.0.0 — do not reintroduce them.
 
 ## Common commands
 

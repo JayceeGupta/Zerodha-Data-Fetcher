@@ -46,6 +46,202 @@ def sample_instrument_df() -> pd.DataFrame:
 
 
 @pytest.fixture
+def sample_mcx_futures_df() -> pd.DataFrame:
+    """Raw-lowercase instrument frame (as load_instrument_data returns it).
+
+    Mirrors the discovery data: GOLD with non-consecutive expiries (no
+    Sep/Nov/Jan), CRUDEOIL consecutive monthly, prefix-collision families
+    (GOLDM/GOLDPETAL/GOLDGUINEA, SILVER/SILVERM), MCX-OPT rows that must be
+    filtered out, and equity rows to prove the stock path is untouched.
+    """
+    return pd.DataFrame(
+        [
+            # GOLD futures — non-consecutive months (Aug, Oct, Dec, Feb)
+            {
+                "instrument_token": 111,
+                "tradingsymbol": "GOLD24AUGFUT",
+                "name": "GOLD",
+                "exchange": "MCX",
+                "expiry": "2024-08-05",
+                "strike": 0,
+                "lot_size": 1,
+                "instrument_type": "FUT",
+                "segment": "MCX-FUT",
+            },
+            {
+                "instrument_token": 113,
+                "tradingsymbol": "GOLD24DECFUT",
+                "name": "GOLD",
+                "exchange": "MCX",
+                "expiry": "2024-12-05",
+                "strike": 0,
+                "lot_size": 1,
+                "instrument_type": "FUT",
+                "segment": "MCX-FUT",
+            },
+            {
+                "instrument_token": 112,
+                "tradingsymbol": "GOLD24OCTFUT",
+                "name": "GOLD",
+                "exchange": "MCX",
+                "expiry": "2024-10-04",
+                "strike": 0,
+                "lot_size": 1,
+                "instrument_type": "FUT",
+                "segment": "MCX-FUT",
+            },
+            {
+                "instrument_token": 114,
+                "tradingsymbol": "GOLD25FEBFUT",
+                "name": "GOLD",
+                "exchange": "MCX",
+                "expiry": "2025-02-05",
+                "strike": 0,
+                "lot_size": 1,
+                "instrument_type": "FUT",
+                "segment": "MCX-FUT",
+            },
+            # CRUDEOIL futures — consecutive months (Jul, Aug, Sep)
+            {
+                "instrument_token": 121,
+                "tradingsymbol": "CRUDEOIL24JULFUT",
+                "name": "CRUDEOIL",
+                "exchange": "MCX",
+                "expiry": "2024-07-19",
+                "strike": 0,
+                "lot_size": 1,
+                "instrument_type": "FUT",
+                "segment": "MCX-FUT",
+            },
+            {
+                "instrument_token": 122,
+                "tradingsymbol": "CRUDEOIL24AUGFUT",
+                "name": "CRUDEOIL",
+                "exchange": "MCX",
+                "expiry": "2024-08-19",
+                "strike": 0,
+                "lot_size": 1,
+                "instrument_type": "FUT",
+                "segment": "MCX-FUT",
+            },
+            {
+                "instrument_token": 123,
+                "tradingsymbol": "CRUDEOIL24SEPFUT",
+                "name": "CRUDEOIL",
+                "exchange": "MCX",
+                "expiry": "2024-09-19",
+                "strike": 0,
+                "lot_size": 1,
+                "instrument_type": "FUT",
+                "segment": "MCX-FUT",
+            },
+            # Prefix-collision families — distinct underlyings, must NOT match "GOLD"/"SILVER"
+            {
+                "instrument_token": 131,
+                "tradingsymbol": "GOLDM24AUGFUT",
+                "name": "GOLDM",
+                "exchange": "MCX",
+                "expiry": "2024-08-05",
+                "strike": 0,
+                "lot_size": 1,
+                "instrument_type": "FUT",
+                "segment": "MCX-FUT",
+            },
+            {
+                "instrument_token": 132,
+                "tradingsymbol": "GOLDPETAL24AUGFUT",
+                "name": "GOLDPETAL",
+                "exchange": "MCX",
+                "expiry": "2024-08-31",
+                "strike": 0,
+                "lot_size": 1,
+                "instrument_type": "FUT",
+                "segment": "MCX-FUT",
+            },
+            {
+                "instrument_token": 133,
+                "tradingsymbol": "GOLDGUINEA24AUGFUT",
+                "name": "GOLDGUINEA",
+                "exchange": "MCX",
+                "expiry": "2024-08-31",
+                "strike": 0,
+                "lot_size": 1,
+                "instrument_type": "FUT",
+                "segment": "MCX-FUT",
+            },
+            {
+                "instrument_token": 141,
+                "tradingsymbol": "SILVER24SEPFUT",
+                "name": "SILVER",
+                "exchange": "MCX",
+                "expiry": "2024-09-05",
+                "strike": 0,
+                "lot_size": 1,
+                "instrument_type": "FUT",
+                "segment": "MCX-FUT",
+            },
+            {
+                "instrument_token": 142,
+                "tradingsymbol": "SILVERM24AUGFUT",
+                "name": "SILVERM",
+                "exchange": "MCX",
+                "expiry": "2024-08-30",
+                "strike": 0,
+                "lot_size": 1,
+                "instrument_type": "FUT",
+                "segment": "MCX-FUT",
+            },
+            # MCX-OPT rows — must be excluded even though name matches GOLD
+            {
+                "instrument_token": 151,
+                "tradingsymbol": "GOLD24DEC70000CE",
+                "name": "GOLD",
+                "exchange": "MCX",
+                "expiry": "2024-12-05",
+                "strike": 70000,
+                "lot_size": 1,
+                "instrument_type": "CE",
+                "segment": "MCX-OPT",
+            },
+            {
+                "instrument_token": 152,
+                "tradingsymbol": "GOLD24DEC70000PE",
+                "name": "GOLD",
+                "exchange": "MCX",
+                "expiry": "2024-12-05",
+                "strike": 70000,
+                "lot_size": 1,
+                "instrument_type": "PE",
+                "segment": "MCX-OPT",
+            },
+            # Equity rows — stock path must be unaffected
+            {
+                "instrument_token": 101,
+                "tradingsymbol": "INFY",
+                "name": "Infosys Limited",
+                "exchange": "NSE",
+                "expiry": "",
+                "strike": 0,
+                "lot_size": 0,
+                "instrument_type": "EQ",
+                "segment": "NSE",
+            },
+            {
+                "instrument_token": 303,
+                "tradingsymbol": "RELIANCE",
+                "name": "Reliance Industries",
+                "exchange": "NSE",
+                "expiry": "",
+                "strike": 0,
+                "lot_size": 0,
+                "instrument_type": "EQ",
+                "segment": "NSE",
+            },
+        ]
+    )
+
+
+@pytest.fixture
 def fake_config_kwargs() -> Dict[str, str]:
     return {
         "user_id": "test_user",
@@ -126,10 +322,12 @@ class FakeExecutor:
         max_workers: Optional[int] = None,
         requests_per_second: Optional[int] = None,
         future_factory: Optional[Callable[[Any, tuple], FakeFuture]] = None,
+        rate_limiter: Any = None,
     ):
         self.max_workers = max_workers
         self.requests_per_second = requests_per_second
         self.future_factory = future_factory
+        self.rate_limiter = rate_limiter
         self.submitted_params = []
         self.shutdown_called = False
 

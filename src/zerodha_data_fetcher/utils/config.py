@@ -130,50 +130,31 @@ class Config:
         """
         Validate that all required configuration is present.
 
+        Only the three user credentials (user ID, password, TOTP secret) are
+        required; URLs/keyring/type are optional and default internally.
+
         Returns:
             bool: True if all required config is present, False otherwise
         """
-        required_vars = [
-            self.ZERODHA_USER_ID,
-            self.ZERODHA_PASSWORD,
-            self.ZERODHA_TYPE,
-            self.ZERODHA_TOTP_SECRET,
-            self.ZERODHA_BASE_URL,
-            self.ZERODHA_LOGIN_URL,
-            self.ZERODHA_2FA_URL,
-            self.ZERODHA_HISTORICAL_URL,
-            self.ZERODHA_KEYRING_TOKEN_KEY,
-            self.ZERODHA_KEYRING_ENCRYPTION_KEY,
-        ]
-
-        missing_vars = [var for var in required_vars if not var]
-
-        if missing_vars:
-            return False
-        return True
+        return not self.get_missing_config()
 
     def get_missing_config(self) -> list:
         """
-        Get list of missing configuration variables.
+        Get list of missing **required** configuration variables.
+
+        Only the three user credentials are required; the URLs, keyring keys,
+        and user type all default internally (see :meth:`__init__`), so blank
+        values there must not be reported as missing.
 
         Returns:
-            list: List of missing environment variable names
+            list: Names of any missing credential env vars, in a stable order.
         """
-        config_mapping = {
-            self.ZERODHA_USER_ID: "ZERODHA_USER_ID",
-            self.ZERODHA_PASSWORD: "ZERODHA_PASSWORD",
-            self.ZERODHA_TYPE: "ZERODHA_TYPE",
-            self.ZERODHA_TOTP_SECRET: "ZERODHA_TOTP_SECRET",
-            self.ZERODHA_BASE_URL: "ZERODHA_BASE_URL",
-            self.ZERODHA_LOGIN_URL: "ZERODHA_LOGIN_URL",
-            self.ZERODHA_2FA_URL: "ZERODHA_2FA_URL",
-            self.ZERODHA_HISTORICAL_URL: "ZERODHA_HISTORICAL_URL",
-            self.ZERODHA_KEYRING_TOKEN_KEY: "ZERODHA_KEYRING_TOKEN_KEY",
-            self.ZERODHA_KEYRING_ENCRYPTION_KEY: "ZERODHA_KEYRING_ENCRYPTION_KEY",
-        }
-        return [
-            var_name for var_value, var_name in config_mapping.items() if not var_value
+        required = [
+            (self.ZERODHA_USER_ID, "ZERODHA_USER_ID"),
+            (self.ZERODHA_PASSWORD, "ZERODHA_PASSWORD"),
+            (self.ZERODHA_TOTP_SECRET, "ZERODHA_TOTP_SECRET"),
         ]
+        return [name for value, name in required if not value]
 
     def to_dict(self) -> Dict[str, str]:
         """

@@ -1,62 +1,89 @@
 import pandas as pd
+import pytest
 
 from zerodha_data_fetcher.core.instrument_manager import ZerodhaInstrumentManager
 from zerodha_data_fetcher.utils import data_loader as data_loader_module
 
 
-def test_get_instrument_token_returns_stock_token(monkeypatch, sample_instrument_df):
+def _as_raw_columns(df):
+    return df.rename(
+        columns={
+            "Instrument_Token": "instrument_token",
+            "Name": "tradingsymbol",
+            "FullName": "name",
+            "Exchange": "exchange",
+        }
+    )
+
+
+@pytest.fixture
+def manager_with_sample(monkeypatch, sample_instrument_df):
     monkeypatch.setattr(
         "zerodha_data_fetcher.core.instrument_manager.load_instrument_data",
-        lambda **kwargs: sample_instrument_df.rename(
-            columns={
-                "Instrument_Token": "instrument_token",
-                "Name": "tradingsymbol",
-                "FullName": "name",
-                "Exchange": "exchange",
-            }
-        ),
+        lambda **kwargs: _as_raw_columns(sample_instrument_df),
     )
-    manager = ZerodhaInstrumentManager()
-
-    assert manager.get_instrument_token("INFY") == 101
+    return ZerodhaInstrumentManager()
 
 
-def test_get_instrument_token_prefers_explicit_exchange(
-    monkeypatch, sample_instrument_df
-):
+@pytest.fixture
+def manager_with_mcx(monkeypatch, sample_mcx_futures_df):
     monkeypatch.setattr(
         "zerodha_data_fetcher.core.instrument_manager.load_instrument_data",
-        lambda **kwargs: sample_instrument_df.rename(
-            columns={
-                "Instrument_Token": "instrument_token",
-                "Name": "tradingsymbol",
-                "FullName": "name",
-                "Exchange": "exchange",
-            }
-        ),
+        lambda **kwargs: sample_mcx_futures_df,
     )
-    manager = ZerodhaInstrumentManager()
-
-    assert manager.get_instrument_token("INFY", exchange="BSE") == 202
+    return ZerodhaInstrumentManager()
 
 
-def test_get_instrument_token_returns_none_for_unknown_symbol(
-    monkeypatch, sample_instrument_df
-):
-    monkeypatch.setattr(
-        "zerodha_data_fetcher.core.instrument_manager.load_instrument_data",
-        lambda **kwargs: sample_instrument_df.rename(
-            columns={
-                "Instrument_Token": "instrument_token",
-                "Name": "tradingsymbol",
-                "FullName": "name",
-                "Exchange": "exchange",
-            }
-        ),
-    )
-    manager = ZerodhaInstrumentManager()
+def test_resolve_symbol_exact_futures_tradingsymbol(manager_with_mcx):
+    # A specific contract's tradingsymbol is unambiguous and must resolve.
+    assert manager_with_mcx.resolve_symbol("GOLD24AUGFUT") == 111
 
-    assert manager.get_instrument_token("UNKNOWN") is None
+
+def test_resolve_symbol_underlying_does_not_pick_a_futures_expiry(manager_with_mcx):
+    # "GOLD" is only a futures underlying here; it must NOT silently resolve
+    # to an arbitrary expiry token (111-114) via full-name/substring matching.
+    assert manager_with_mcx.resolve_symbol("GOLD") is None
+
+
+def test_validate_symbol_false_for_futures_underlying(manager_with_mcx):
+    assert manager_with_mcx.validate_symbol("GOLD") is False
+
+
+def test_resolve_symbol_passes_through_integer_token(manager_with_sample):
+    assert manager_with_sample.resolve_symbol(408065) == 408065
+
+
+def test_resolve_symbol_treats_numeric_string_as_token(manager_with_sample):
+    assert manager_with_sample.resolve_symbol("202") == 202
+
+
+def test_resolve_symbol_matches_tradingsymbol_with_nse_preference(manager_with_sample):
+    # INFY exists on both NSE (101) and BSE (202); NSE wins by default.
+    assert manager_with_sample.resolve_symbol("infy") == 101
+
+
+def test_resolve_symbol_honours_exchange_prefix(manager_with_sample):
+    assert manager_with_sample.resolve_symbol("BSE:INFY") == 202
+
+
+def test_resolve_symbol_honours_exchange_argument(manager_with_sample):
+    assert manager_with_sample.resolve_symbol("INFY", exchange="BSE") == 202
+
+
+def test_resolve_symbol_falls_back_to_full_name(manager_with_sample):
+    assert manager_with_sample.resolve_symbol("Reliance Industries") == 303
+
+
+def test_resolve_symbol_best_effort_substring(manager_with_sample):
+    assert manager_with_sample.resolve_symbol("RELIAN") == 303
+
+
+def test_resolve_symbol_returns_none_for_unknown(manager_with_sample):
+    assert manager_with_sample.resolve_symbol("ZZZ-NOT-A-SYMBOL") is None
+
+
+def test_resolve_symbol_returns_none_for_blank(manager_with_sample):
+    assert manager_with_sample.resolve_symbol("   ") is None
 
 
 def test_search_symbol_returns_matches_with_limit(monkeypatch, sample_instrument_df):
@@ -148,36 +175,6 @@ def test_validate_symbol_false_for_missing_symbol(monkeypatch, sample_instrument
     assert manager.validate_symbol("MISSING") is False
 
 
-def test_fetch_instrument_ids_for_equity_uses_loaded_symbols(
-    monkeypatch, sample_instrument_df
-):
-    monkeypatch.setattr(
-        "zerodha_data_fetcher.core.instrument_manager.load_instrument_data",
-        lambda **kwargs: sample_instrument_df.rename(
-            columns={
-                "Instrument_Token": "instrument_token",
-                "Name": "tradingsymbol",
-                "FullName": "name",
-                "Exchange": "exchange",
-            }
-        ),
-    )
-    manager = ZerodhaInstrumentManager()
-    monkeypatch.setattr(
-        manager, "_load_equity_stocks", lambda: ["INFY", "RELIANCE", "MISSING"]
-    )
-
-    results = manager.fetch_instrument_ids(is_stock=True)
-
-    assert results["Name"].tolist() == ["INFY", "RELIANCE"]
-
-
-def test_normalize_commodity_symbol_basic_case():
-    manager = ZerodhaInstrumentManager()
-
-    assert manager._normalize_commodity_symbol("GOLD petal") == "GOLD petal"
-
-
 def test_instrument_manager_uses_shared_ttl_resolution(
     monkeypatch, sample_instrument_df
 ):
@@ -205,7 +202,7 @@ def test_instrument_manager_uses_shared_ttl_resolution(
     )
 
     manager = ZerodhaInstrumentManager()
-    manager.get_instrument_token("INFY")
+    manager.resolve_symbol("INFY")
 
     assert manager.cache_ttl_minutes == 77
     assert captured["cache_ttl_minutes"] == 77

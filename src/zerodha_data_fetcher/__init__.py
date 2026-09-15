@@ -8,7 +8,7 @@ This package provides tools for:
 - Parallel data fetching with error handling
 """
 
-__version__ = "1.2.0"
+__version__ = "2.0.0"
 __author__ = "Jayam Gupta"
 __email__ = "guptajayam47@gmail.com"
 __description__ = (
@@ -19,8 +19,10 @@ __url__ = "https://github.com/JayceeGupta/Zerodha-Data-Fetcher"
 # Import main classes and functions for easy access
 try:
     # Core functionality
-    from .core.data_fetcher import ZerodhaDataFetcher, fetchDataZerodha
-    from .core.instrument_manager import ZerodhaInstrumentManager, fetchZerodhaID
+    from .core.data_fetcher import ZerodhaDataFetcher
+    from .core.instrument_manager import ZerodhaInstrumentManager
+    from .core.contract_selector import ResolvedContract
+    from .core.continuous import stitch_segments
     from .core.auth import AuthenticationManager
     from .core.rate_limiter import RateLimitedThreadPoolExecutor
 
@@ -33,6 +35,7 @@ try:
         InvalidTickerError,
         DataFetchError,
         TokenExpiredError,
+        StaleInstrumentDataError,
     )
 
     # Public API - what users can import
@@ -40,11 +43,10 @@ try:
         # Main classes
         "ZerodhaDataFetcher",
         "ZerodhaInstrumentManager",
+        "ResolvedContract",
+        "stitch_segments",
         "AuthenticationManager",
         "Config",
-        # Backward compatibility functions
-        "fetchDataZerodha",
-        "fetchZerodhaID",
         # Instrument cache helpers
         "refresh_instruments",
         # Utilities
@@ -56,6 +58,7 @@ try:
         "InvalidTickerError",
         "DataFetchError",
         "TokenExpiredError",
+        "StaleInstrumentDataError",
         # Package metadata
         "__version__",
         "__author__",

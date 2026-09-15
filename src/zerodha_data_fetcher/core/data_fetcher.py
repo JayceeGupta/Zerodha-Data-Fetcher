@@ -3,9 +3,10 @@
 import json
 import logging
 import threading
-from concurrent.futures import as_completed
+from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, timedelta
-from typing import Any, Dict, List, Literal, Optional, Tuple, Union
+from typing import Any, Dict, List, Literal, Optional, Sequence, Tuple, Union
 
 import pandas as pd
 import requests
@@ -20,7 +21,8 @@ from ..utils.exceptions import (
 from ..utils.helpers import execution_timer, retry_on_failure
 from .auth import AuthenticationManager
 from .instrument_manager import ZerodhaInstrumentManager
-from .rate_limiter import RateLimitedThreadPoolExecutor
+from .continuous import stitch_segments
+from .rate_limiter import RateLimitedThreadPoolExecutor, RequestRateLimiter
 
 logger = logging.getLogger(__name__)
 
@@ -124,19 +126,16 @@ class ZerodhaDataFetcher:
 
     @staticmethod
     def _format_date_range_label(start_date: date, end_date: date) -> str:
-        """Format a human-readable date range label."""
+        """Format a human-readable date range label (chunk params are (start, end, ...))."""
         return f"{start_date} to {end_date}"
-
-    def _format_params_range_label(self, params: Tuple) -> str:
-        """Format a date range label from chunk parameters."""
-        return self._format_date_range_label(params[0], params[1])
 
     def _summarize_failed_ranges(
         self, failed_chunks: List[Tuple[Tuple, Exception]]
     ) -> str:
         """Return a compact range summary for failed chunk parameters."""
         return ", ".join(
-            self._format_params_range_label(params) for params, _ in failed_chunks
+            self._format_date_range_label(params[0], params[1])
+            for params, _ in failed_chunks
         )
 
     def _extract_error_payload(self, error_message: str) -> Optional[Dict[str, Any]]:
@@ -245,6 +244,11 @@ class ZerodhaDataFetcher:
         Raises:
             InvalidTickerError: If ticker token is invalid.
         """
+        # A numeric string is the same thing as an integer token, so route it
+        # through the same validated path — 123 and "123" behave identically.
+        if isinstance(ticker_token, str) and ticker_token.strip().isdigit():
+            ticker_token = int(ticker_token.strip())
+
         if isinstance(ticker_token, int):
             logger.debug("Validating integer ticker token: %s", ticker_token)
             if not self._validate_ticker_token(ticker_token):
@@ -254,16 +258,9 @@ class ZerodhaDataFetcher:
         if isinstance(ticker_token, str):
             logger.debug("Resolving symbol to instrument token: %s", ticker_token)
 
-            instrument_token = self.instrument_manager.get_instrument_token(
-                ticker_token.upper(),
-                is_stock=True,
-            )
-
-            if instrument_token is None:
-                instrument_token = self.instrument_manager.get_instrument_token(
-                    ticker_token,
-                    is_stock=False,
-                )
+            # resolve_symbol handles exact tradingsymbol/name matches,
+            # EXCHANGE:SYMBOL syntax, and a best-effort substring fallback.
+            instrument_token = self.instrument_manager.resolve_symbol(ticker_token)
 
             if instrument_token is None:
                 raise InvalidTickerError(f"Symbol not found: {ticker_token}")
@@ -446,6 +443,252 @@ class ZerodhaDataFetcher:
         return date_ranges
 
     @execution_timer
+    def fetch_futures_historical_data(
+        self,
+        underlying: str,
+        start_date: date,
+        end_date: date,
+        *,
+        selector: str = "near",
+        year: Optional[int] = None,
+        month: Optional[int] = None,
+        exchange: str = "MCX",
+        segment: str = "MCX-FUT",
+        timeframe: str = "minute",
+        roll_offset_days: int = 0,
+        on_stale: Optional[str] = None,
+        chunk_failure_mode: Optional[ChunkFailureMode] = None,
+    ) -> pd.DataFrame:
+        """Resolve one futures contract for *underlying*, then fetch it.
+
+        The historical fetch path is instrument-token driven, so this method
+        only adds contract resolution on top of :meth:`fetch_historical_data`;
+        the output schema is unchanged: ``[Date, Time, Open, High, Low, Close,
+        Volume]``.
+
+        Args:
+            underlying: Underlying name (e.g. ``"GOLD"``), matched exactly.
+            selector: ``"near"``/``"near_prev"``/``"near_next"`` (by expiry) or
+                ``"specific"`` (requires *year* and *month*).
+            year, month: Required when ``selector == "specific"``.
+            roll_offset_days: Roll the ``near`` contract this many days before
+                expiry (see :meth:`ZerodhaInstrumentManager.resolve_futures_contract`).
+            on_stale: Freshness policy for forward selectors; ``None`` uses the
+                instrument manager's default.
+
+        Raises:
+            ValueError: If ``selector == "specific"`` without *year*/*month*,
+                or if no contract can be resolved for the request.
+        """
+        if selector == "specific":
+            if year is None or month is None:
+                raise ValueError(
+                    "selector='specific' requires both 'year' and 'month'."
+                )
+            contract = self.instrument_manager.resolve_specific_contract(
+                underlying, year, month, exchange=exchange, segment=segment
+            )
+        else:
+            contract = self.instrument_manager.resolve_futures_contract(
+                underlying,
+                selector,
+                exchange=exchange,
+                segment=segment,
+                roll_offset_days=roll_offset_days,
+                on_stale=on_stale,
+            )
+
+        if contract is None:
+            raise ValueError(
+                "Could not resolve a %s futures contract for %r (selector=%r)."
+                % (segment, underlying, selector)
+            )
+
+        logger.info(
+            "Resolved %s %s → %s (token %s, expiry %s)",
+            underlying,
+            selector,
+            contract.tradingsymbol,
+            contract.instrument_token,
+            contract.expiry,
+        )
+        return self.fetch_historical_data(
+            contract.instrument_token,
+            start_date,
+            end_date,
+            timeframe=timeframe,
+            chunk_failure_mode=chunk_failure_mode,
+        )
+
+    def fetch_futures_bundle(
+        self,
+        underlying: str,
+        start_date: date,
+        end_date: date,
+        *,
+        selectors: Sequence[str] = ("near_prev", "near", "near_next"),
+        exchange: str = "MCX",
+        segment: str = "MCX-FUT",
+        timeframe: str = "minute",
+        roll_offset_days: int = 0,
+        on_stale: Optional[str] = None,
+        chunk_failure_mode: Optional[ChunkFailureMode] = None,
+    ) -> Dict[str, pd.DataFrame]:
+        """Resolve and fetch several selectors for one underlying concurrently.
+
+        Each selector's fetch runs on its own thread, but all contracts share
+        a single :class:`RequestRateLimiter`, so the effective request rate
+        stays within ``requests_per_second`` no matter how many contracts are
+        fetched (rather than N × the budget from N independent executors).
+
+        Selectors that resolve to ``None`` are dropped; selectors resolving to
+        the same instrument token are fetched once and share the result frame.
+
+        Returns:
+            A dict keyed by selector; each value is the historical DataFrame
+            (schema ``[Date, Time, Open, High, Low, Close, Volume]``).  Empty
+            dict if nothing resolves.
+        """
+        resolved: Dict[str, "object"] = {}
+        for selector in selectors:
+            contract = self.instrument_manager.resolve_futures_contract(
+                underlying,
+                selector,
+                exchange=exchange,
+                segment=segment,
+                roll_offset_days=roll_offset_days,
+                on_stale=on_stale,
+            )
+            if contract is not None:
+                resolved[selector] = contract
+
+        if not resolved:
+            logger.warning(
+                "fetch_futures_bundle resolved no contracts for %r (selectors=%s)",
+                underlying,
+                tuple(selectors),
+            )
+            return {}
+
+        # De-duplicate identical tokens so a shared contract is fetched once.
+        token_to_selectors: Dict[int, List[str]] = defaultdict(list)
+        for selector, contract in resolved.items():
+            token_to_selectors[contract.instrument_token].append(selector)
+
+        # One limiter shared across every contract's fetch (the rate-safety fix).
+        shared_limiter = RequestRateLimiter(self.requests_per_second)
+
+        results: Dict[str, pd.DataFrame] = {}
+        with ThreadPoolExecutor(max_workers=len(token_to_selectors)) as pool:
+            future_to_token = {
+                pool.submit(
+                    self.fetch_historical_data,
+                    token,
+                    start_date,
+                    end_date,
+                    timeframe=timeframe,
+                    chunk_failure_mode=chunk_failure_mode,
+                    rate_limiter=shared_limiter,
+                ): token
+                for token in token_to_selectors
+            }
+            for future in as_completed(future_to_token):
+                token = future_to_token[future]
+                frame = future.result()
+                for selector in token_to_selectors[token]:
+                    results[selector] = frame
+
+        return results
+
+    def fetch_futures_continuous(
+        self,
+        underlying: str,
+        start_date: date,
+        end_date: date,
+        *,
+        adjust: str = "none",
+        exchange: str = "MCX",
+        segment: str = "MCX-FUT",
+        timeframe: str = "minute",
+        chunk_failure_mode: Optional[ChunkFailureMode] = None,
+    ) -> pd.DataFrame:
+        """Build a front-month continuous series across the date range.
+
+        Enumerates the futures contracts of *underlying* active within
+        ``[start_date, end_date]``, fetches each (concurrently, under one
+        shared rate limiter), and stitches them by expiry via
+        :func:`~zerodha_data_fetcher.core.continuous.stitch_segments`.
+
+        The roll rule is calendar expiry (each contract owns the bars up to
+        its expiry).  ``adjust`` is ``"none"`` (raw, default), ``"ratio"``, or
+        ``"diff"`` — back-adjustment re-anchors history when the newest
+        contract changes, so pin the range for reproducibility.
+
+        Note:
+            Historical data for already-expired contracts depends on the
+            broker endpoint's retention window; this method is only as complete
+            as what the fetch path returns for each contract.
+
+        Returns:
+            One chronological DataFrame, or empty if no contracts are found.
+        """
+        contracts = self.instrument_manager.get_futures_contracts(
+            underlying,
+            exchange=exchange,
+            segment=segment,
+            include_expired=True,
+        )
+        if contracts.empty or "Expiry" not in contracts.columns:
+            logger.warning(
+                "fetch_futures_continuous found no futures contracts for %r.",
+                underlying,
+            )
+            return pd.DataFrame()
+
+        parsed = pd.to_datetime(contracts["Expiry"], errors="coerce")
+        contracts = contracts.assign(_expiry=parsed.dt.date).dropna(subset=["_expiry"])
+        contracts = contracts.sort_values("_expiry")
+
+        # Contracts covering the range: expiry on/after start, up to and
+        # including the first contract expiring on/after end.
+        selected: List[Tuple[int, date]] = []
+        for _, row in contracts.iterrows():
+            expiry = row["_expiry"]
+            if expiry < start_date:
+                continue
+            selected.append((int(row["Instrument_Token"]), expiry))
+            if expiry >= end_date:
+                break
+
+        if not selected:
+            logger.warning(
+                "fetch_futures_continuous found no contracts in range for %r.",
+                underlying,
+            )
+            return pd.DataFrame()
+
+        shared_limiter = RequestRateLimiter(self.requests_per_second)
+        frames: Dict[int, pd.DataFrame] = {}
+        with ThreadPoolExecutor(max_workers=len(selected)) as pool:
+            future_to_token = {
+                pool.submit(
+                    self.fetch_historical_data,
+                    token,
+                    start_date,
+                    end_date,
+                    timeframe=timeframe,
+                    chunk_failure_mode=chunk_failure_mode,
+                    rate_limiter=shared_limiter,
+                ): token
+                for token, _ in selected
+            }
+            for future in as_completed(future_to_token):
+                token = future_to_token[future]
+                frames[token] = future.result()
+
+        segments = [(expiry, frames[token]) for token, expiry in selected]
+        return stitch_segments(segments, adjust=adjust)
+
     def fetch_historical_data(
         self,
         ticker_token: Union[int, str],
@@ -453,6 +696,7 @@ class ZerodhaDataFetcher:
         end_date: date,
         timeframe: str = "minute",
         chunk_failure_mode: Optional[ChunkFailureMode] = None,
+        rate_limiter: Optional[RequestRateLimiter] = None,
     ) -> pd.DataFrame:
         """
         Fetch historical data from Zerodha API.
@@ -520,6 +764,7 @@ class ZerodhaDataFetcher:
             with RateLimitedThreadPoolExecutor(
                 max_workers=Config.MAX_WORKERS,
                 requests_per_second=self.requests_per_second,
+                rate_limiter=rate_limiter,
             ) as executor:
                 future_to_params = {
                     executor.submit(self._fetch_data_chunk, params): params
@@ -570,7 +815,7 @@ class ZerodhaDataFetcher:
                     summary = (
                         f"Historical fetch failed in strict mode after "
                         f"{len(failed_chunks)} chunk failure(s); first failed range "
-                        f"{self._format_params_range_label(first_failed_params)}: {first_error}"
+                        f"{self._format_date_range_label(first_failed_params[0], first_failed_params[1])}: {first_error}"
                     )
                     if cancelled_pending_chunks:
                         summary += (
@@ -591,7 +836,7 @@ class ZerodhaDataFetcher:
                         "Historical fetch failed: all "
                         f"{len(failed_chunks)} chunk(s) failed. Failed ranges: "
                         f"{self._summarize_failed_ranges(failed_chunks)}. First error from "
-                        f"{self._format_params_range_label(first_failed_params)}: {first_error}"
+                        f"{self._format_date_range_label(first_failed_params[0], first_failed_params[1])}: {first_error}"
                     )
 
             if not all_data:
@@ -664,45 +909,3 @@ class ZerodhaDataFetcher:
         except Exception as exc:
             logger.error("Error searching symbols for '%s': %s", partial_name, str(exc))
             return pd.DataFrame()
-
-
-# ---------------------------------------------------------------------------
-# Legacy API — preserved for backward compatibility only.
-# New code should use ZerodhaDataFetcher directly.
-# ---------------------------------------------------------------------------
-
-
-@execution_timer
-def fetchDataZerodha(
-    ticker_token: Union[int, str] = 408065,
-    startDate: date = date(2021, 5, 9),
-    endDate: date = date(2021, 6, 9),
-    reqPerSec: int = 2,
-) -> pd.DataFrame:
-    """Fetch historical data from Zerodha.
-
-    .. deprecated::
-        Use :class:`ZerodhaDataFetcher` and its
-        :meth:`~ZerodhaDataFetcher.fetch_historical_data` method instead.
-        This function is retained only so that existing callers continue
-        to work without changes.
-
-    Args:
-        ticker_token: Instrument token or symbol.
-        startDate: Start date for data fetch.
-        endDate: End date for data fetch.
-        reqPerSec: Requests per second rate limit.
-
-    Returns:
-        pd.DataFrame: Historical data.
-    """
-    import warnings
-
-    warnings.warn(
-        "fetchDataZerodha() is deprecated. "
-        "Use ZerodhaDataFetcher().fetch_historical_data() instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    fetcher = ZerodhaDataFetcher(requests_per_second=reqPerSec)
-    return fetcher.fetch_historical_data(ticker_token, startDate, endDate)

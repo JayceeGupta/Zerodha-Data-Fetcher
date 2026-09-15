@@ -69,6 +69,19 @@ class DataFetchError(ZerodhaAPIError):
     pass
 
 
+class StaleInstrumentDataError(ZerodhaAPIError):
+    """Raised when the instrument file is too stale to resolve a near-month.
+
+    Signalled only under the ``on_stale="error"`` policy: the loaded
+    instrument data has no futures contract for the requested underlying
+    expiring on/after the roll cutoff, so a ``near``/``near_next`` query
+    cannot be answered correctly.  Call ``refresh_instruments()`` (or use
+    ``on_stale="refresh"``) to force-download a fresh master.
+    """
+
+    pass
+
+
 class TokenExpiredError(AuthenticationError):
     """Raised when a previously cached authentication token has expired.
 

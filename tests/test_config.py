@@ -57,6 +57,41 @@ def test_get_missing_config_reports_only_missing_keys(clear_zerodha_env):
     assert config.get_missing_config() == ["ZERODHA_TOTP_SECRET"]
 
 
+def test_validate_config_true_with_only_credentials_when_urls_blank(
+    monkeypatch, clear_zerodha_env
+):
+    # URLs / keyring / type explicitly blank; only the three credentials are
+    # required for authentication.
+    for key in [
+        "ZERODHA_TYPE",
+        "ZERODHA_BASE_URL",
+        "ZERODHA_LOGIN_URL",
+        "ZERODHA_2FA_URL",
+        "ZERODHA_HISTORICAL_URL",
+        "ZERODHA_KEYRING_TOKEN_KEY",
+        "ZERODHA_KEYRING_ENCRYPTION_KEY",
+    ]:
+        monkeypatch.setenv(key, "")
+
+    config = Config(user_id="u", password="p", totp_secret="t")
+
+    assert config.validate_config() is True
+    assert config.get_missing_config() == []
+
+
+def test_get_missing_config_ignores_blank_urls(monkeypatch, clear_zerodha_env):
+    monkeypatch.setenv("ZERODHA_BASE_URL", "")
+    config = Config(user_id="u", password="p", totp_secret="t")
+
+    assert config.get_missing_config() == []
+
+
+def test_get_missing_config_lists_only_missing_credentials(clear_zerodha_env):
+    config = Config(user_id="u")  # password + totp_secret absent
+
+    assert config.get_missing_config() == ["ZERODHA_PASSWORD", "ZERODHA_TOTP_SECRET"]
+
+
 def test_to_dict_returns_expected_keys_and_values(
     fake_config_kwargs, clear_zerodha_env
 ):

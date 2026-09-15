@@ -245,6 +245,22 @@ Cache location:
 - `search_symbols(partial_name, limit=10)` — search instruments by partial name; returns a DataFrame.
 - `get_instrument_info(symbol)` — instrument metadata for a symbol, when available.
 
+### `ZerodhaInstrumentManager`
+
+- `resolve_symbol(query, exchange=None)` — the recommended way to turn user input
+  into an instrument token. Tries, in order: an integer or numeric-string token as-is;
+  `EXCHANGE:SYMBOL` syntax (e.g. `"BSE:INFY"`); an exact `tradingsymbol` match (NSE
+  preferred over BSE unless `exchange` is given); an exact full-`name` match; then a
+  best-effort substring match. Returns the token (`int`) or `None`. Per the Kite
+  instruments spec, `exchange` + `tradingsymbol` is the reliable key — numeric tokens
+  are reused across expiries — so resolution is symbol-driven.
+- `search_symbol(partial_name, limit=10, exchange=None)` — DataFrame of matches.
+- `validate_symbol(symbol, exchange=None)` — exact-match existence check.
+
+Authentication is optimized for multi-threaded use: the decrypted token is cached in
+memory (process-global, per user ID), so concurrent fetches reuse it without repeated
+keyring reads, and only one thread re-runs the login flow when a token expires.
+
 ### Package helpers
 
 - `setup_logging(...)` — configure console and optional rotating file logging.

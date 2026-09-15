@@ -2,7 +2,6 @@
 
 import json
 import logging
-import os
 from typing import Dict
 
 import pyotp
@@ -190,69 +189,3 @@ class ZerodhaTokenGenerator:
         except Exception as e:
             logger.error("Authentication failed: %s", str(e))
             raise AuthenticationError(f"Token generation failed: {str(e)}")
-
-
-# ---------------------------------------------------------------------------
-# Legacy API — preserved for backward compatibility only.
-# New code should use ZerodhaTokenGenerator directly.
-# ---------------------------------------------------------------------------
-
-
-def getEncAuthToken() -> str:
-    """Generate an authentication token.
-
-    .. deprecated::
-        Use ``ZerodhaTokenGenerator(config).generate_auth_token()`` instead.
-        This function is retained only so that existing callers continue
-        to work without changes.
-
-    Returns:
-        str: The encrypted authentication token.
-    """
-    import warnings
-
-    warnings.warn(
-        "getEncAuthToken() is deprecated. "
-        "Use ZerodhaTokenGenerator(config).generate_auth_token() instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    from ..utils.config import Config
-
-    generator = ZerodhaTokenGenerator(config=Config())
-    return generator.generate_auth_token()
-
-
-def get_TOTP(key: str = "ZERODHA_TOTP_SECRET") -> str:
-    """Generate a TOTP value.
-
-    .. deprecated::
-        Use ``ZerodhaTokenGenerator(config).get_totp(secret)`` instead.
-        This function is retained only so that existing callers continue
-        to work without changes.
-
-    Args:
-        key: TOTP secret key, **or** the name of an environment variable
-            that holds the secret (detected when *key* is ALL_CAPS with
-            underscores, e.g. ``"ZERODHA_TOTP_SECRET"``).
-
-    Returns:
-        str: The current TOTP value.
-    """
-    import warnings
-
-    warnings.warn(
-        "get_TOTP() is deprecated. "
-        "Use ZerodhaTokenGenerator(config).get_totp(secret) instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    from ..utils.config import Config
-
-    generator = ZerodhaTokenGenerator(config=Config())
-    # If key looks like an env var name, get it from environment
-    if key.isupper() and "_" in key:
-        secret = os.getenv(key, "")
-    else:
-        secret = key
-    return generator.get_totp(secret)

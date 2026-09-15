@@ -5,6 +5,56 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-09-15
+
+### Added
+- `ZerodhaInstrumentManager.resolve_symbol()` — the recommended way to turn user
+  input into an instrument token. Handles integer/numeric-string tokens,
+  `EXCHANGE:SYMBOL` syntax (e.g. `"BSE:INFY"`), exact `tradingsymbol` and full
+  `name` matches (with NSE→BSE exchange preference), and a best-effort substring
+  fallback. Follows the Kite instruments spec, where `exchange` + `tradingsymbol`
+  is the reliable unique key (numeric tokens are reused across expiries).
+- MCX commodity futures support: `get_futures_contracts()`, near/previous/next and
+  specific-contract resolution, `on_stale` freshness policy,
+  `fetch_futures_historical_data()`, `fetch_futures_bundle()`, and
+  `fetch_futures_continuous()` (raw / ratio / diff back-adjusted stitching).
+
+### Changed
+- **Multi-threaded auth optimization.** `AuthenticationManager` now holds the
+  decrypted token in a process-global in-memory cache keyed by user ID. The hot
+  path returns straight from memory (no keyring read/decrypt per request), and
+  double-checked locking guarantees that exactly one thread runs the login + 2FA
+  flow when a token expires — instead of every concurrent request
+  re-authenticating independently. This removes the request lag seen under
+  concurrency when the cached token was stale.
+- `ZerodhaDataFetcher` symbol resolution now routes through `resolve_symbol()`.
+- `validate_symbol()` signature simplified to `(symbol, exchange=None)` (the
+  meaningless `is_stock` flag was dropped).
+
+### Fixed
+- **Auth invalidation race.** `invalidate_token()` now evicts the in-memory
+  entry and deletes the persisted bundle under a single lock, so a concurrent
+  `get_auth_token()` can no longer reload and republish a token that was just
+  invalidated (e.g. after a `TokenException`).
+- **`resolve_symbol()` no longer silently returns a derivative from a fuzzy
+  match.** Full-name and substring matching are restricted to cash instruments,
+  so an underlying like `"GOLD"` can't resolve to an arbitrary futures expiry;
+  a specific contract's `tradingsymbol` (e.g. `"GOLD24AUGFUT"`) still resolves
+  exactly. Use `resolve_futures_contract()` for underlying + expiry selection.
+- **Consistent numeric-token handling.** `fetch_historical_data("123")` now
+  goes through the same token validation as `fetch_historical_data(123)`.
+
+### Removed
+- **Breaking:** retired the legacy backward-compatibility API and the
+  scrip-master lookup path that only served it: `get_instrument_token()`,
+  `fetch_instrument_ids()`, the `equity_scrip_path`/`commodity_scrip_path`
+  constructor arguments, and the top-level `fetchDataZerodha`, `fetchZerodhaID`,
+  `getEncAuthToken`, and `get_TOTP` functions. Use `ZerodhaDataFetcher`,
+  `ZerodhaInstrumentManager.resolve_symbol()`, and `ZerodhaTokenGenerator`
+  directly instead.
+- Internal streamlining: collapsed redundant indirection (`Config._required_config`
+  and the `_format_params_range_label` chunk-label wrapper) into their call sites.
+
 ## [1.2.0] - 2026-04-28
 
 ### Added

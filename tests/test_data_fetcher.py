@@ -174,24 +174,40 @@ def test_resolve_ticker_token_raises_for_invalid_integer_token(
         fetcher._resolve_ticker_token(123)
 
 
-def test_resolve_ticker_token_resolves_stock_symbol(fetcher_factory):
+def test_resolve_ticker_token_validates_numeric_string_like_int(
+    fetcher_factory, monkeypatch
+):
+    fetcher = fetcher_factory()
+    monkeypatch.setattr(fetcher, "_validate_ticker_token", lambda token: token == 123)
+
+    # "123" is the same token as 123 and must go through the same validation.
+    assert fetcher._resolve_ticker_token("123") == 123
+
+
+def test_resolve_ticker_token_raises_for_invalid_numeric_string(
+    fetcher_factory, monkeypatch
+):
+    fetcher = fetcher_factory()
+    monkeypatch.setattr(fetcher, "_validate_ticker_token", lambda _token: False)
+
+    with pytest.raises(InvalidTickerError, match="Invalid ticker token: 123"):
+        fetcher._resolve_ticker_token("123")
+
+
+def test_resolve_ticker_token_resolves_symbol_via_resolve_symbol(fetcher_factory):
     class InstrumentManagerStub:
-        def get_instrument_token(self, symbol, is_stock=True, exchange=None):
-            if symbol == "INFY" and is_stock:
-                return 111
-            return None
+        def resolve_symbol(self, query, exchange=None):
+            return 111 if query == "infy" else None
 
     fetcher = fetcher_factory(instrument_manager=InstrumentManagerStub())
 
     assert fetcher._resolve_ticker_token("infy") == 111
 
 
-def test_resolve_ticker_token_falls_back_to_commodity_lookup(fetcher_factory):
+def test_resolve_ticker_token_resolves_commodity_symbol(fetcher_factory):
     class InstrumentManagerStub:
-        def get_instrument_token(self, symbol, is_stock=True, exchange=None):
-            if symbol == "gold petal" and not is_stock:
-                return 444
-            return None
+        def resolve_symbol(self, query, exchange=None):
+            return 444 if query == "gold petal" else None
 
     fetcher = fetcher_factory(instrument_manager=InstrumentManagerStub())
 
@@ -200,7 +216,7 @@ def test_resolve_ticker_token_falls_back_to_commodity_lookup(fetcher_factory):
 
 def test_resolve_ticker_token_raises_when_symbol_missing(fetcher_factory):
     class InstrumentManagerStub:
-        def get_instrument_token(self, symbol, is_stock=True, exchange=None):
+        def resolve_symbol(self, query, exchange=None):
             return None
 
     fetcher = fetcher_factory(instrument_manager=InstrumentManagerStub())
@@ -1157,28 +1173,3 @@ def test_search_symbols_returns_empty_dataframe_on_exception(fetcher_factory):
     result = fetcher.search_symbols("INF")
 
     assert result.empty is True
-
-
-def test_fetchDataZerodha_constructs_fetcher_and_delegates_call(monkeypatch):
-    captured = {}
-
-    class FakeFetcher:
-        def __init__(self, requests_per_second):
-            captured["requests_per_second"] = requests_per_second
-
-        def fetch_historical_data(self, ticker_token, start_date, end_date):
-            captured["call"] = (ticker_token, start_date, end_date)
-            return "result"
-
-    monkeypatch.setattr(data_fetcher_module, "ZerodhaDataFetcher", FakeFetcher)
-
-    result = data_fetcher_module.fetchDataZerodha(
-        ticker_token="INFY",
-        startDate=date(2024, 1, 1),
-        endDate=date(2024, 1, 2),
-        reqPerSec=5,
-    )
-
-    assert result == "result"
-    assert captured["requests_per_second"] == 5
-    assert captured["call"] == ("INFY", date(2024, 1, 1), date(2024, 1, 2))

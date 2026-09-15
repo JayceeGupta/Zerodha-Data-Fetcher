@@ -172,6 +172,35 @@ From the data plus general knowledge (flag live-verify items):
 
 ---
 
+## 8. Freshness / reconciliation strategy for new contracts
+
+**Question raised:** as time moves forward, MCX lists new monthly contracts (e.g. `GOLD25AUGFUT`, then `GOLD25OCTFUT`, …). The bundled CSV is a frozen snapshot and will never contain them. Do we need a reconciliation/fetch step that pulls new instrument scrips from Kite and merges them into the CSV?
+
+**Finding: the reconciliation strategy already exists, and it is whole-file replacement — not row-level merge.**
+
+- `download_instruments` (`data_loader.py:81`) fetches the **entire** instrument master from `https://api.kite.trade/instruments` — Kite's **public, unauthenticated** bulk CSV dump that contains *every* live instrument, including all current MCX-FUT months. There is no separate per-symbol "scrip" API call in the codebase; "fetching the instrument scrip from Kite" **is** this bulk download.
+- `load_instrument_data` (`data_loader.py:110`) re-downloads whenever the cached copy is older than `cache_ttl_minutes` (default 1440 = 24 h; overridable via `ZERODHA_INSTRUMENT_CACHE_TTL`), and only falls back to the bundled CSV if the download fails (`data_loader.py:169`).
+- `refresh_instruments` (`instrument_manager.py:215`) force-downloads on demand, ignoring TTL.
+
+So newly-listed contracts appear **automatically** the next time the TTL lapses or `refresh_instruments()` is called — the whole cached file is discarded and replaced with Kite's current master. Because the dump is public and free, this costs nothing against the historical-fetch rate budget and needs no credentials.
+
+**Recommendation: do NOT build a per-symbol scrip fetch + diff/append reconciliation layer.** Whole-file replacement is strictly simpler and more correct: it cannot leave stale or duplicate rows, cannot drift out of sync with expiries/lot sizes, and requires no merge logic. A row-level reconciler would be more code, more fragile, and buy nothing here.
+
+### 8.1 The real gap: stale-file detection for forward selectors
+
+Whole-file replacement covers *new contracts*; what it does not do is **tell the caller when the file they are resolving against is too stale to answer a forward-looking query**. Two concrete cases:
+
+1. **Offline / bundled-only:** if the download is blocked and the loader falls back to the bundled CSV (expiries `2024-07-19 … 2025-06-05`, §5), a `near`-month resolution silently returns a long-expired contract with no signal that the answer is worthless.
+2. **Expiry-day TTL lag:** with a 24 h TTL, on/around an expiry day the cached file can momentarily lack the just-listed far contract or still present the just-expired one as `near` (§7.8).
+
+**Decidable staleness signal (pure, no network):** for a forward selector (`near`/`near_next`), the file is *stale-for-near-month* when — after filtering to the requested underlying — **no contract has `Expiry >= cutoff`** (`cutoff = as_of + roll_offset_days`). This is the sharp signal: missing *far* months never breaks `near` (near is always the earliest future contract), so staleness for `near` reduces to "is there any future contract at all." Surface the newest available expiry alongside, so warnings/errors are actionable. `near_prev` and `specific` (historical) selectors are **exempt** — they depend on expired-contract retention (§7.3), not on file freshness.
+
+**Policy (single `on_stale` flag, default `"warn"`):** `"ignore"` (silent best-guess = today's behavior), `"warn"` (log + set `stale=True` on the returned contract + return best guess; non-breaking), `"error"` (raise `StaleInstrumentDataError`, forcing a refresh), `"refresh"` (call `refresh_instruments()` once, reload, re-resolve; if still stale, degrade to `warn` — the **only** policy that adds a network call, and it is opt-in). Settable per-call and as a constructor default. The bundled-fallback case is independently suspect but is already caught by the content signal (the bundled file's max expiry is in the past), so no extra `source` plumbing is required for the first pass.
+
+**Implementation home:** Phase 3 (§8 of the plan), since it is forward-selector freshness that pairs with auto-rollover — see the implementation plan for the API surface, error type, and tests.
+
+---
+
 ## Feasibility verdict
 
 **Highly feasible, and primarily a resolution/selection problem — not a fetch-path problem.** The historical fetch pipeline (`data_fetcher.py`) is entirely instrument-token-driven via a single templated URL (`config.py:65`), so it already works for any MCX futures token once resolved; the parser even already reads the Open Interest column that futures care about. The bulk of the work is a **new contract-selection layer** in the instrument manager that filters by `segment == MCX-FUT`, groups by the underlying `name`, and sorts by the `expiry` column (all data already in the CSV) to pick near / near-1 / near+1 / a specific month — plus a mandatory fix to widen the loader's column set (the custom-path `usecols` and the rename map currently drop `expiry`/`segment`/`instrument_type`). Main risks are operational rather than architectural: live confirmation of MCX historical permissions and expired-contract retention on the undocumented `oms` endpoint, a shared-rate-limiter decision for multi-contract concurrency, and cache-TTL freshness around expiry days.
